@@ -1,0 +1,36 @@
+# Binarios compilados
+bin/
+*.exe
+*.test
+*.out
+
+# Cobertura
+coverage.out
+coverage.html
+coverage
+
+# Dependencias vendored (opcional: descomentá si vendoreás)
+# vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Entorno
+.env
+.env.local
+.env.*.local
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Volúmenes Docker locales
+.docker-volumes/
+data/

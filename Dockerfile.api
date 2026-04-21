@@ -1,0 +1,44 @@
+# syntax=docker/dockerfile:1.7
+#
+# Dockerfile multi-stage para el servicio `api`.
+# La separación builder/runtime nos da una imagen final mínima (~15MB con alpine)
+# y evita que el binario final contenga el toolchain de Go.
+
+# ---------- Builder ----------
+FROM golang:1.22-alpine AS builder
+
+WORKDIR /src
+
+# Copiar módulos primero permite cachear el paso `go mod download` en la layer
+# mientras no cambien go.mod/go.sum — acelera mucho los rebuilds de CI.
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+# CGO_ENABLED=0 produce un binario estático — corre en `scratch` o `alpine` sin libc.
+# -ldflags="-s -w" reduce ~20% el tamaño del binario (strips debug info y symbol table).
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -ldflags="-s -w" \
+    -o /out/api ./cmd/api
+
+# ---------- Runtime ----------
+FROM alpine:3.20
+
+# ca-certificates: necesario para TLS saliente (ES cloud, DB externas, etc.)
+# curl: útil para healthchecks en docker-compose
+RUN apk add --no-cache ca-certificates curl
+
+# Usuario no-root: buena práctica de seguridad; si un atacante escapa del proceso
+# Go, no tiene privilegios de root en el contenedor.
+RUN addgroup -S app && adduser -S app -G app
+USER app
+
+WORKDIR /app
+COPY --from=builder /out/api /app/api
+
+EXPOSE 8080
+HEALTHCHECK --interval=30s --timeout=3s --retries=3 \
+    CMD curl -fsS http://localhost:8080/health || exit 1
+
+ENTRYPOINT ["/app/api"]

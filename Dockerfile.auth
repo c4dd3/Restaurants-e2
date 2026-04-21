@@ -1,0 +1,23 @@
+# syntax=docker/dockerfile:1.7
+# Dockerfile multi-stage para el servicio `auth` — idéntico al de api
+# salvo el binario y el puerto. Se mantiene separado para poder versionarlos independientemente.
+
+FROM golang:1.22-alpine AS builder
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/auth ./cmd/auth
+
+FROM alpine:3.20
+RUN apk add --no-cache ca-certificates curl
+RUN addgroup -S app && adduser -S app -G app
+USER app
+WORKDIR /app
+COPY --from=builder /out/auth /app/auth
+
+EXPOSE 8081
+HEALTHCHECK --interval=30s --timeout=3s --retries=3 \
+    CMD curl -fsS http://localhost:8081/health || exit 1
+
+ENTRYPOINT ["/app/auth"]

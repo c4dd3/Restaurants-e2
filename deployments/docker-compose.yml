@@ -1,0 +1,278 @@
+# ============================================================================
+# Restaurants-e2 — orquestación completa de desarrollo/evaluación local.
+#
+# Perfiles (Docker Compose profiles):
+#   - default: levanta todo lo necesario para correr el sistema.
+#   - postgres / mongo: permite levantar solo un motor de BD (ahorra recursos).
+#
+# Cómo usar:
+#   docker compose -f deployments/docker-compose.yml --profile postgres up --build
+#   docker compose -f deployments/docker-compose.yml --profile mongo    up --build
+#
+# Escalamiento horizontal:
+#   docker compose ... up --scale api=3 --scale search=2
+#   Nginx las descubre vía DNS de Docker (resolver 127.0.0.11).
+# ============================================================================
+
+services:
+
+  # ----------------------------------------------------------------------
+  #  Balanceador — entrada única al sistema (puerto 80)
+  # ----------------------------------------------------------------------
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: re2_nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      api:
+        condition: service_healthy
+      auth:
+        condition: service_healthy
+      search:
+        condition: service_healthy
+    networks: [re2_net]
+    restart: unless-stopped
+
+  # ----------------------------------------------------------------------
+  #  Servicios Go
+  # ----------------------------------------------------------------------
+  api:
+    build:
+      context: ..
+      dockerfile: Dockerfile.api
+    # Sin container_name: permite escalar con docker compose --scale api=N.
+    env_file: ../.env
+    environment:
+      API_PORT: 8080
+    depends_on:
+      redis:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    networks: [re2_net]
+    restart: unless-stopped
+
+  auth:
+    build:
+      context: ..
+      dockerfile: Dockerfile.auth
+    env_file: ../.env
+    environment:
+      AUTH_PORT: 8081
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8081/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    networks: [re2_net]
+    restart: unless-stopped
+
+  search:
+    build:
+      context: ..
+      dockerfile: Dockerfile.search
+    env_file: ../.env
+    environment:
+      SEARCH_PORT: 8082
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8082/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+    networks: [re2_net]
+    restart: unless-stopped
+
+  # ----------------------------------------------------------------------
+  #  Postgres (modo single-node — suficiente para desarrollo)
+  # ----------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: re2_postgres
+    profiles: ["postgres", "default"]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-restaurants}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks: [re2_net]
+
+  # ----------------------------------------------------------------------
+  #  MongoDB — cluster con 1 replica set + sharding
+  #
+  #  Topología:
+  #    - configsvr (replica set de 1 nodo para simplicidad)
+  #    - 2 shards, cada uno con replica set de 3 nodos (1 primario + 2 secundarios)
+  #    - 1 mongos (router al que apuntan los clientes)
+  #
+  #  Nota: esta es la topología mínima que cumple el enunciado.
+  #  El enunciado pide "Un conjunto de réplicas (1 primario, 2 secundarios)"
+  #  + "Un shard configurado para particionar los datos".
+  #  Aquí armamos 2 shards para poder demostrar la distribución al evaluar.
+  # ----------------------------------------------------------------------
+  mongo_configsvr:
+    image: mongo:7
+    container_name: re2_mongo_configsvr
+    profiles: ["mongo", "default"]
+    command: ["mongod", "--configsvr", "--replSet", "cfgrs", "--port", "27019", "--bind_ip_all"]
+    volumes:
+      - mongo_cfg:/data/db
+    networks: [re2_net]
+
+  # Shard 1 — replica set shard1rs (1 primario + 2 secundarios)
+  mongo_shard1_a:
+    image: mongo:7
+    container_name: re2_mongo_shard1_a
+    profiles: ["mongo", "default"]
+    command: ["mongod", "--shardsvr", "--replSet", "shard1rs", "--port", "27018", "--bind_ip_all"]
+    volumes:
+      - mongo_shard1_a:/data/db
+    networks: [re2_net]
+
+  mongo_shard1_b:
+    image: mongo:7
+    container_name: re2_mongo_shard1_b
+    profiles: ["mongo", "default"]
+    command: ["mongod", "--shardsvr", "--replSet", "shard1rs", "--port", "27018", "--bind_ip_all"]
+    volumes:
+      - mongo_shard1_b:/data/db
+    networks: [re2_net]
+
+  mongo_shard1_c:
+    image: mongo:7
+    container_name: re2_mongo_shard1_c
+    profiles: ["mongo", "default"]
+    command: ["mongod", "--shardsvr", "--replSet", "shard1rs", "--port", "27018", "--bind_ip_all"]
+    volumes:
+      - mongo_shard1_c:/data/db
+    networks: [re2_net]
+
+  # Shard 2 — replica set shard2rs
+  mongo_shard2_a:
+    image: mongo:7
+    container_name: re2_mongo_shard2_a
+    profiles: ["mongo", "default"]
+    command: ["mongod", "--shardsvr", "--replSet", "shard2rs", "--port", "27018", "--bind_ip_all"]
+    volumes:
+      - mongo_shard2_a:/data/db
+    networks: [re2_net]
+
+  mongo_shard2_b:
+    image: mongo:7
+    container_name: re2_mongo_shard2_b
+    profiles: ["mongo", "default"]
+    command: ["mongod", "--shardsvr", "--replSet", "shard2rs", "--port", "27018", "--bind_ip_all"]
+    volumes:
+      - mongo_shard2_b:/data/db
+    networks: [re2_net]
+
+  mongo_shard2_c:
+    image: mongo:7
+    container_name: re2_mongo_shard2_c
+    profiles: ["mongo", "default"]
+    command: ["mongod", "--shardsvr", "--replSet", "shard2rs", "--port", "27018", "--bind_ip_all"]
+    volumes:
+      - mongo_shard2_c:/data/db
+    networks: [re2_net]
+
+  # mongos — router. A este apunta el MONGO_URI de la app.
+  mongos:
+    image: mongo:7
+    container_name: re2_mongos
+    profiles: ["mongo", "default"]
+    command: ["mongos", "--configdb", "cfgrs/mongo_configsvr:27019", "--port", "27017", "--bind_ip_all"]
+    depends_on:
+      - mongo_configsvr
+      - mongo_shard1_a
+      - mongo_shard2_a
+    ports:
+      - "27017:27017"
+    networks: [re2_net]
+
+  # Init one-shot container: inicializa replica sets + agrega shards + define shard keys.
+  # Corre `deployments/mongo/init-cluster.sh` una sola vez. Exit 0 tras terminar.
+  mongo_init:
+    image: mongo:7
+    container_name: re2_mongo_init
+    profiles: ["mongo", "default"]
+    depends_on:
+      - mongos
+    volumes:
+      - ./mongo:/init:ro
+    entrypoint: ["bash", "/init/init-cluster.sh"]
+    networks: [re2_net]
+    restart: "no"
+
+  # ----------------------------------------------------------------------
+  #  Redis — caché
+  # ----------------------------------------------------------------------
+  redis:
+    image: redis:7.4-alpine
+    container_name: re2_redis
+    # maxmemory-policy allkeys-lru: cuando el caché llena 256MB, evicta las claves
+    # usadas menos recientemente. Buena política por defecto para respuestas API.
+    command: ["redis-server", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru", "--save", ""]
+    volumes:
+      - redisdata:/data
+    networks: [re2_net]
+
+  # ----------------------------------------------------------------------
+  #  ElasticSearch — single-node (suficiente para Etapa 2)
+  # ----------------------------------------------------------------------
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.14.0
+    container_name: re2_elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false   # Simplifica el desarrollo; en prod siempre ON.
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m # Limita JVM para no comerse la RAM del host.
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - esdata:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9200/_cluster/health | grep -E '\"status\":\"(yellow|green)\"'"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks: [re2_net]
+
+# ----------------------------------------------------------------------
+#  Volúmenes persistentes
+# ----------------------------------------------------------------------
+volumes:
+  pgdata:
+  redisdata:
+  esdata:
+  mongo_cfg:
+  mongo_shard1_a:
+  mongo_shard1_b:
+  mongo_shard1_c:
+  mongo_shard2_a:
+  mongo_shard2_b:
+  mongo_shard2_c:
+
+networks:
+  re2_net:
+    driver: bridge
