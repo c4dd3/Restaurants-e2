@@ -6,7 +6,6 @@
 #   make up              # levanta todo con el engine por defecto (.env)
 #   make up-postgres     # levanta solo con Postgres
 #   make up-mongo        # levanta solo con Mongo (con sharding)
-#   make test            # corre toda la suite con cobertura
 #   make scale-api N=3   # escala api a N réplicas
 # ============================================================================
 
@@ -36,21 +35,7 @@ build: ## Compila los 3 binarios en ./bin/
 	go build -o bin/auth   ./cmd/auth
 	go build -o bin/search ./cmd/search
 
-# ---------- Tests ----------
-.PHONY: test test-unit test-integration cover
-test: ## Todos los tests con cobertura
-	go test ./... -race -coverprofile=coverage.out -covermode=atomic -coverpkg=./...
-	go tool cover -func=coverage.out | tail -1
-
-test-unit: ## Solo tests unitarios (sin BD)
-	go test -short ./...
-
-test-integration: ## Tests de integración (levanta testcontainers)
-	go test -tags=integration ./test/integration/... -v
-
-cover: test ## Genera reporte HTML de cobertura
-	go tool cover -html=coverage.out -o coverage.html
-	@echo "Abrí coverage.html en tu browser"
+# Tests: pospuestos a fase final del proyecto (ver README).
 
 # ---------- Docker / Compose ----------
 .PHONY: up up-postgres up-mongo down logs ps

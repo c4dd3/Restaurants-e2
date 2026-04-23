@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>5 · Ciclo de vida de un request</title>
+<link rel="stylesheet" href="styles.css">
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({
+    startOnLoad: true, theme: 'base',
+    themeVariables: {
+      background: '#ffffff',
+      mainBkg: '#f8fafc',
+      nodeBorder: '#64748b',
+      primaryTextColor: '#0f172a',
+      lineColor: '#94a3b8',
+      actorBkg: '#dbeafe',
+      actorBorder: '#2563eb',
+      actorTextColor: '#1e3a8a',
+      actorLineColor: '#94a3b8',
+      signalColor: '#334155',
+      signalTextColor: '#0f172a',
+      labelBoxBkgColor: '#fef3c7',
+      labelBoxBorderColor: '#d97706',
+      labelTextColor: '#78350f',
+      loopTextColor: '#0f172a',
+      noteBkgColor: '#d1fae5',
+      noteBorderColor: '#059669',
+      noteTextColor: '#064e3b',
+      activationBkgColor: '#e2e8f0',
+      activationBorderColor: '#64748b',
+      sequenceNumberColor: '#ffffff',
+      fontFamily: 'Inter, system-ui, sans-serif',
+      fontSize: '14px'
+    },
+    sequence: { useMaxWidth: true, showSequenceNumbers: true, boxMargin: 8, messageMargin: 32 }
+  });
+</script>
+</head>
+<body>
+
+<nav class="top">
+  <a class="home" href="index.html">← Índice</a>
+  <span class="nav-links">
+    <a href="04-switch-motor.html">← anterior</a>
+    <a href="06-topologia-despliegue.html">siguiente →</a>
+  </span>
+</nav>
+
+<main>
+  <header class="page">
+    <h1><span class="tag">5</span> Ciclo de vida · <code>POST /reservations</code></h1>
+    <p class="lead">Caso concreto porque toca casi todas las capas: auth, service, port, adapter, invariante de BD, respuesta de error.</p>
+  </header>
+
+  <div class="canvas">
+<pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant C as Cliente
+  participant N as Nginx
+  participant GW as Gin engine
+  participant MW as AuthMiddleware
+  participant H as ReservationHandler
+  participant S as ReservationService
+  participant P as ports.ReservationRepository
+  participant A as repopg.ReservationRepoPg
+  participant DB as Postgres
+  participant CH as CacheRedis
+
+  C->>N: POST /api/reservations<br/>Authorization Bearer jwt
+  N->>GW: proxy_pass al upstream api
+  GW->>MW: pasa por middleware
+  MW->>MW: auth.Parse(jwt, secret)
+  alt token inválido o expirado
+    MW-->>C: 401 unauthorized
+  end
+  MW->>H: c.Set user_id, c.Next()
+  H->>H: ShouldBindJSON CreateReservationRequest
+  H->>S: Create(ctx, userID, req)
+  S->>S: validar fecha futura, people > 0
+  S->>P: CheckAvailability(restaurantID, date)
+  P->>A: SELECT overlaps
+  A->>DB: query con EXCLUDE USING gist
+  DB-->>A: filas
+  A-->>P: bool disponible
+  alt no disponible
+    P-->>S: false
+    S-->>H: ErrConflict
+    H-->>C: 409 slot_not_available
+  end
+  S->>P: Create(reservation)
+  P->>A: INSERT INTO reservations
+  A->>DB: INSERT
+  alt GiST constraint rechaza por race
+    DB-->>A: 23P01 exclusion_violation
+    A-->>P: ErrConflict wrapped
+    P-->>S: ErrConflict
+    S-->>H: ErrConflict
+    H-->>C: 409 slot_not_available
+  else OK
+    DB-->>A: row
+    A-->>P: Reservation
+    P-->>S: reservation
+    S->>CH: DelByPattern restaurants slots
+    S-->>H: reservation
+    H-->>C: 201 Created + reservation
+  end
+</pre>
+  </div>
+
+  <div class="notes">
+    <h2>Decisiones clave visibles en este flujo</h2>
+    <ul>
+      <li><b>Nginx no participa de la lógica</b>: solo hace <code>proxy_pass</code> al upstream <code>api</code>. Los middlewares (auth, CORS) viven en el servicio, no en nginx.</li>
+      <li><b>Chequeo + insert no es atómico</b>: el constraint GiST de Postgres es la red de seguridad. En Mongo, lo resuelve un índice parcial único y retry en <code>DuplicateKeyError</code>.</li>
+      <li><b>El service no toca HTTP</b>: devuelve <code>ErrConflict</code> y el handler mapea a 409 vía <code>errors.go::domainToHTTP</code>.</li>
+      <li><b>Cache invalidation</b> es responsabilidad del service, no del adapter — el adapter no conoce Redis.</li>
+      <li><b>Ownership</b> del user_id viene SIEMPRE del token, nunca del body.</li>
+    </ul>
+  </div>
+</main>
+</body>
+</html>

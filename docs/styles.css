@@ -1,0 +1,168 @@
+/* ============================================================================
+   Restaurants-e2 — estilos compartidos por todos los diagramas de arquitectura.
+   Tema claro, alto contraste, amigable para lecturas largas.
+   ============================================================================ */
+
+:root {
+  --bg:       #faf8f3;   /* warm off-white — menos fatigante que blanco puro */
+  --panel:    #ffffff;   /* paneles principales */
+  --panel-2:  #f5f2ea;   /* paneles secundarios */
+  --ink:      #1c1917;   /* texto principal — warm near-black */
+  --muted:    #78716c;   /* texto secundario */
+  --accent:   #2563eb;   /* azul para acentos e hiperlinks */
+  --accent-2: #059669;   /* emerald para bordes de notas */
+  --warn:     #b45309;   /* amber oscuro para reglas */
+  --rule:     #e7e5e4;   /* divisores sutiles */
+  --code-bg:  #f1ede3;   /* fondo de bloques de código */
+  --shadow:   0 1px 2px rgba(0,0,0,.04), 0 2px 6px rgba(0,0,0,.04);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0; padding: 0;
+  background: var(--bg); color: var(--ink);
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  line-height: 1.55;
+}
+
+/* ------------------------- Layout principal ------------------------- */
+
+main {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 28px 32px 96px;
+}
+
+header.page {
+  margin: 18px 0 28px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--rule);
+}
+header.page h1 {
+  font-size: 27px;
+  margin: 0 0 8px;
+  display: flex; align-items: center; gap: 12px;
+  letter-spacing: -0.01em;
+}
+header.page h1 .tag {
+  font-size: 13px; font-weight: 700;
+  color: var(--accent);
+  background: rgba(37,99,235,.08);
+  padding: 3px 10px; border-radius: 999px;
+}
+header.page p.lead {
+  margin: 0; color: var(--muted); font-size: 15.5px;
+}
+
+/* ------------------------- Navegación ------------------------- */
+
+nav.top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 32px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--panel);
+  font-size: 14px;
+}
+nav.top a {
+  color: var(--ink); text-decoration: none;
+  padding: 6px 10px; border-radius: 5px;
+  transition: background .12s, color .12s;
+}
+nav.top a:hover { background: var(--panel-2); color: var(--accent); }
+nav.top .nav-links { display: flex; gap: 6px; }
+nav.top .home { font-weight: 600; letter-spacing: .02em; color: var(--muted); }
+nav.top .home:hover { color: var(--accent); }
+
+/* ------------------------- Canvas del diagrama ------------------------- */
+
+.canvas {
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  padding: 28px;
+  overflow-x: auto;
+  margin-bottom: 22px;
+  box-shadow: var(--shadow);
+}
+.canvas pre.mermaid { margin: 0; text-align: center; }
+
+.canvas + .canvas { margin-top: -6px; }   /* acerca un poco dos canvas consecutivos */
+
+.canvas-label {
+  font-size: 13px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  font-weight: 700;
+  margin: 26px 0 10px 4px;
+}
+
+.legend {
+  display: flex; flex-wrap: wrap; gap: 16px;
+  margin-top: 16px; font-size: 12.5px; color: var(--muted);
+  padding-top: 14px; border-top: 1px dashed var(--rule);
+}
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; border: 1px solid rgba(0,0,0,.1); }
+
+/* ------------------------- Notas técnicas ------------------------- */
+
+.notes {
+  padding: 18px 22px;
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--accent-2);
+  border-radius: 0 10px 10px 0;
+  font-size: 15px; line-height: 1.68;
+  box-shadow: var(--shadow);
+}
+.notes h2 {
+  margin: 0 0 12px; font-size: 12.5px;
+  color: var(--accent-2); text-transform: uppercase;
+  letter-spacing: .08em; font-weight: 700;
+}
+.notes ul { margin: 0; padding-left: 22px; }
+.notes li { margin: 7px 0; }
+.notes code, code {
+  font-family: "JetBrains Mono", Menlo, Consolas, monospace;
+  background: var(--code-bg);
+  padding: 1px 6px; border-radius: 3px;
+  font-size: 13.5px; color: #422006;
+}
+.rule { color: var(--warn); font-weight: 600; }
+
+/* ------------------------- Index (landing) ------------------------- */
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 18px; margin-top: 10px;
+}
+.card {
+  padding: 22px 24px;
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  text-decoration: none; color: var(--ink);
+  transition: border-color .15s, transform .15s, box-shadow .15s;
+  display: block;
+  box-shadow: var(--shadow);
+}
+.card:hover {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 14px rgba(37,99,235,.1);
+}
+.card .num {
+  display: inline-block;
+  font-size: 12px; font-weight: 700;
+  color: var(--accent);
+  background: rgba(37,99,235,.09);
+  padding: 3px 10px; border-radius: 999px;
+  margin-bottom: 10px;
+}
+.card h3 { margin: 0 0 6px; font-size: 17px; letter-spacing: -0.005em; }
+.card p  { margin: 0; color: var(--muted); font-size: 13.8px; line-height: 1.55; }

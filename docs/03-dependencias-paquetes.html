@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>3 · Dependencias de paquetes</title>
+<link rel="stylesheet" href="styles.css">
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({
+    startOnLoad: true, theme: 'base',
+    themeVariables: {
+      background: '#ffffff',
+      mainBkg: '#f8fafc',
+      nodeBorder: '#64748b',
+      clusterBkg: '#f1f5f9',
+      clusterBorder: '#cbd5e1',
+      primaryTextColor: '#0f172a',
+      lineColor: '#94a3b8',
+      fontFamily: 'Inter, system-ui, sans-serif',
+      fontSize: '14px'
+    },
+    flowchart: { curve: 'basis', padding: 16, nodeSpacing: 40, rankSpacing: 55, useMaxWidth: true }
+  });
+</script>
+</head>
+<body>
+
+<nav class="top">
+  <a class="home" href="index.html">← Índice</a>
+  <span class="nav-links">
+    <a href="02-hexagonal-dao.html">← anterior</a>
+    <a href="04-switch-motor.html">siguiente →</a>
+  </span>
+</nav>
+
+<main>
+  <header class="page">
+    <h1><span class="tag">3</span> Grafo de dependencias entre paquetes</h1>
+    <p class="lead">Quién puede importar a quién. Las flechas son imports Go permitidos. Lo que no aparece, está prohibido por diseño.</p>
+  </header>
+
+  <div class="canvas">
+<pre class="mermaid">
+flowchart LR
+  CMDAPI["cmd/api"]
+  CMDAUTH["cmd/auth"]
+  CMDSEARCH["cmd/search"]
+
+  WIR["internal/wiring"]
+  TR["internal/transport/http"]
+  SV["internal/service"]
+  PO["internal/ports"]
+  DO["internal/domain"]
+  AU["internal/auth"]
+  AD_PG["internal/adapters/repopg"]
+  AD_MO["internal/adapters/repomongo"]
+  AD_RD["internal/adapters/cacheredis"]
+  AD_ES["internal/adapters/searches"]
+  CFG["internal/config"]
+
+  CMDAPI --> WIR
+  CMDAPI --> TR
+  CMDAPI --> SV
+  CMDAPI --> AU
+  CMDAPI --> CFG
+
+  CMDAUTH --> WIR
+  CMDAUTH --> TR
+  CMDAUTH --> SV
+  CMDAUTH --> AU
+  CMDAUTH --> CFG
+
+  CMDSEARCH --> TR
+  CMDSEARCH --> AU
+  CMDSEARCH --> AD_ES
+  CMDSEARCH --> CFG
+
+  WIR --> PO
+  WIR --> AD_PG
+  WIR --> AD_MO
+  WIR --> AD_RD
+  WIR --> AD_ES
+  WIR --> CFG
+
+  TR --> SV
+  TR --> DO
+  TR --> AU
+
+  SV --> PO
+  SV --> DO
+  SV --> AU
+
+  PO --> DO
+
+  AD_PG --> PO
+  AD_PG --> DO
+  AD_MO --> PO
+  AD_MO --> DO
+  AD_RD --> PO
+  AD_ES --> PO
+  AD_ES --> DO
+
+  AU --> DO
+
+  classDef cmd fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
+  classDef infra fill:#fef3c7,stroke:#d97706,color:#78350f
+  classDef core fill:#d1fae5,stroke:#059669,color:#064e3b
+  classDef special fill:#ffedd5,stroke:#ea580c,color:#7c2d12
+  class CMDAPI,CMDAUTH,CMDSEARCH cmd
+  class AD_PG,AD_MO,AD_RD,AD_ES infra
+  class SV,DO,PO,AU,TR core
+  class WIR special
+</pre>
+    <div class="legend">
+      <span><i style="background:#dbeafe;border-color:#2563eb"></i>Binarios (cmd/)</span>
+      <span><i style="background:#d1fae5;border-color:#059669"></i>Núcleo + transport</span>
+      <span><i style="background:#fef3c7;border-color:#d97706"></i>Adapters de infra</span>
+      <span><i style="background:#ffedd5;border-color:#ea580c"></i>Wiring (excepción)</span>
+    </div>
+  </div>
+
+  <div class="notes">
+    <h2>Reglas que este grafo materializa</h2>
+    <ul>
+      <li><code>service</code> y <code>transport</code> <span class="rule">no</span> pueden importar adapters. La única excepción es <code>wiring</code> — por eso es un paquete separado.</li>
+      <li><code>wiring</code> actúa como "el main auxiliar": es el único que conoce simultáneamente los ports y todos los adapters.</li>
+      <li><code>cmd/search</code> no pasa por <code>wiring</code>: su única infra es ElasticSearch; importa el adapter directo.</li>
+      <li><code>domain</code> es hoja: no importa nada de este gráfico. Si alguna dependencia apuntara hacia él que no sea import puro, es señal de acoplamiento incorrecto.</li>
+    </ul>
+  </div>
+</main>
+</body>
+</html>

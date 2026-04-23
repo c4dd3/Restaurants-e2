@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>7 · Modelo de datos</title>
+<link rel="stylesheet" href="styles.css">
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({
+    startOnLoad: true, theme: 'base',
+    themeVariables: {
+      background: '#ffffff',
+      mainBkg: '#f8fafc',
+      nodeBorder: '#64748b',
+      clusterBkg: '#f1f5f9',
+      clusterBorder: '#cbd5e1',
+      primaryTextColor: '#0f172a',
+      lineColor: '#94a3b8',
+      fontFamily: 'Inter, system-ui, sans-serif',
+      fontSize: '13px'
+    },
+    er: { useMaxWidth: true }
+  });
+</script>
+<style>
+  table.schema {
+    width: 100%; border-collapse: collapse; font-size: 13.5px; margin-top: 10px;
+    background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; overflow: hidden;
+  }
+  table.schema th, table.schema td {
+    text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--rule); vertical-align: top;
+  }
+  table.schema th {
+    background: var(--panel-2); font-weight: 600; font-size: 12.5px;
+    text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
+  }
+  table.schema tr:last-child td { border-bottom: none; }
+  table.schema td code { font-size: 12.5px; }
+  table.schema td.pk { color: var(--accent); font-weight: 600; }
+  table.schema td.fk { color: var(--accent-2); }
+  .entity-title {
+    display: flex; align-items: baseline; gap: 10px; margin: 28px 0 6px;
+  }
+  .entity-title h3 {
+    margin: 0; font-size: 17px; letter-spacing: -0.005em;
+  }
+  .entity-title .meta { font-size: 13px; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<nav class="top">
+  <a class="home" href="index.html">← Índice</a>
+  <span class="nav-links">
+    <a href="06-topologia-despliegue.html">← anterior</a>
+    <a href="08-api-contrato.html">siguiente →</a>
+  </span>
+</nav>
+
+<main>
+  <header class="page">
+    <h1><span class="tag">7</span> Modelo de datos</h1>
+    <p class="lead">Siete entidades con la misma forma en Postgres y Mongo. En Postgres son tablas con FK; en Mongo los menús embeben sus productos y las órdenes embeben sus items.</p>
+  </header>
+
+  <div class="canvas-label">Diagrama entidad-relación</div>
+  <div class="canvas">
+<pre class="mermaid">
+erDiagram
+  USERS ||--o{ RESTAURANTS : "admin_id"
+  USERS ||--o{ RESERVATIONS : "user_id"
+  USERS ||--o{ ORDERS : "user_id"
+  RESTAURANTS ||--o{ MENUS : "restaurant_id"
+  RESTAURANTS ||--o{ RESERVATIONS : "restaurant_id"
+  RESTAURANTS ||--o{ ORDERS : "restaurant_id"
+  RESTAURANTS ||--o{ PRODUCTS : "restaurant_id (denormalizado)"
+  MENUS ||--o{ PRODUCTS : "menu_id"
+  RESERVATIONS ||--o| ORDERS : "opcional · reservation_id"
+  ORDERS ||--o{ ORDER_ITEMS : "order_id"
+  PRODUCTS ||--o{ ORDER_ITEMS : "product_id"
+
+  USERS {
+    uuid id PK
+    string name
+    string email UK
+    string password_hash
+    string role "client|admin"
+    timestamp created_at
+    timestamp updated_at
+  }
+  RESTAURANTS {
+    uuid id PK
+    string name
+    string address
+    string phone
+    string description
+    uuid admin_id FK
+    int capacity
+    timestamp created_at
+    timestamp updated_at
+  }
+  MENUS {
+    uuid id PK
+    uuid restaurant_id FK
+    string name
+    string description
+    timestamp created_at
+    timestamp updated_at
+  }
+  PRODUCTS {
+    uuid id PK
+    uuid menu_id FK
+    uuid restaurant_id FK
+    string name
+    string description
+    string category
+    decimal price
+    bool available
+  }
+  RESERVATIONS {
+    uuid id PK
+    uuid restaurant_id FK
+    uuid user_id FK
+    timestamp date
+    int party_size
+    string status "pending|confirmed|cancelled"
+    string notes
+    timestamp created_at
+  }
+  ORDERS {
+    uuid id PK
+    uuid user_id FK
+    uuid restaurant_id FK
+    uuid reservation_id FK "nullable"
+    decimal total
+    string status "pending|confirmed|cancelled"
+    bool pickup
+    timestamp created_at
+  }
+  ORDER_ITEMS {
+    uuid id PK
+    uuid order_id FK
+    uuid product_id FK
+    int quantity
+    decimal price "snapshot"
+  }
+</pre>
+  </div>
+
+  <div class="canvas-label">Detalle por entidad</div>
+
+  <div class="entity-title">
+    <h3>User</h3>
+    <span class="meta">· <code>users</code> en pg · <code>users</code> en mongo</span>
+  </div>
+  <table class="schema">
+    <thead><tr><th>Campo</th><th>Tipo</th><th>Reglas</th><th>Notas</th></tr></thead>
+    <tbody>
+      <tr><td class="pk"><code>id</code></td><td>UUID</td><td>PK</td><td>generado por <code>gen_random_uuid()</code> en pg; <code>ObjectID</code> en mongo via <code>_id</code></td></tr>
+      <tr><td><code>name</code></td><td>string(255)</td><td>NOT NULL, min 2 chars</td><td></td></tr>
+      <tr><td><code>email</code></td><td>string(255)</td><td>NOT NULL, UNIQUE, formato email</td><td>login se hace contra este campo</td></tr>
+      <tr><td><code>password</code></td><td>string</td><td>NOT NULL</td><td>hash bcrypt cost=12 · <code>json:"-"</code> · nunca sale en respuestas</td></tr>
+      <tr><td><code>role</code></td><td>enum</td><td><code>client</code> | <code>admin</code></td><td>CHECK en pg · validación de dominio en mongo</td></tr>
+      <tr><td><code>created_at</code> / <code>updated_at</code></td><td>timestamptz</td><td>default NOW()</td><td></td></tr>
+    </tbody>
+  </table>
+
+  <div class="entity-title">
+    <h3>Restaurant</h3>
+    <span class="meta">· <code>restaurants</code></span>
+  </div>
+  <table class="schema">
+    <thead><tr><th>Campo</th><th>Tipo</th><th>Reglas</th><th>Notas</th></tr></thead>
+    <tbody>
+      <tr><td class="pk"><code>id</code></td><td>UUID</td><td>PK</td><td></td></tr>
+      <tr><td><code>name</code></td><td>string(255)</td><td>NOT NULL</td><td></td></tr>
+      <tr><td><code>address</code></td><td>string(500)</td><td>NOT NULL</td><td></td></tr>
+      <tr><td><code>phone</code></td><td>string(50)</td><td>NOT NULL</td><td></td></tr>
+      <tr><td><code>description</code></td><td>text</td><td>opcional</td><td></td></tr>
+      <tr><td class="fk"><code>admin_id</code></td><td>UUID</td><td>FK → users(id), ON DELETE RESTRICT</td><td>un restaurante siempre tiene dueño; no se borra al borrar user</td></tr>
+      <tr><td><code>capacity</code></td><td>int</td><td>CHECK &gt; 0</td><td>usado para chequeo de disponibilidad en reservas</td></tr>
+      <tr><td><code>created_at</code> / <code>updated_at</code></td><td>timestamptz</td><td>default NOW()</td><td></td></tr>
+    </tbody>
+  </table>
+
+  <div class="entity-title">
+    <h3>Menu</h3>
+    <span class="meta">· <code>menus</code> · embeds <code>products</code> en mongo</span>
+  </div>
+  <table class="schema">
+    <thead><tr><th>Campo</th><th>Tipo</th><th>Reglas</th><th>Notas</th></tr></thead>
+    <tbody>
+      <tr><td class="pk"><code>id</code></td><td>UUID</td><td>PK</td><td></td></tr>
+      <tr><td class="fk"><code>restaurant_id</code></td><td>UUID</td><td>FK → restaurants, ON DELETE CASCADE</td><td>borrar un restaurante borra sus menús</td></tr>
+      <tr><td><code>name</code></td><td>string(255)</td><td>NOT NULL</td><td></td></tr>
+      <tr><td><code>description</code></td><td>text</td><td>opcional</td><td></td></tr>
+      <tr><td><code>products</code></td><td>array&lt;Product&gt;</td><td>—</td><td><b>En pg</b>: join separado. <b>En mongo</b>: array embebido dentro del menú.</td></tr>
+      <tr><td><code>created_at</code> / <code>updated_at</code></td><td>timestamptz</td><td>default NOW()</td><td></td></tr>
+    </tbody>
+  </table>
+
+  <div class="entity-title">
+    <h3>Product</h3>
+    <span class="meta">· <code>products</code> · <b>sharded</b> en mongo por <code>category</code> (hashed)</span>
+  </div>
+  <table class="schema">
+    <thead><tr><th>Campo</th><th>Tipo</th><th>Reglas</th><th>Notas</th></tr></thead>
+    <tbody>
+      <tr><td class="pk"><code>id</code></td><td>UUID</td><td>PK</td><td></td></tr>
+      <tr><td class="fk"><code>menu_id</code></td><td>UUID</td><td>FK → menus, ON DELETE CASCADE</td><td></td></tr>
+      <tr><td class="fk"><code>restaurant_id</code></td><td>UUID</td><td>FK → restaurants, ON DELETE CASCADE</td><td>denormalizado para evitar join en /search</td></tr>
+      <tr><td><code>name</code></td><td>string(255)</td><td>NOT NULL</td><td></td></tr>
+      <tr><td><code>description</code></td><td>text</td><td>opcional · fallback <code>"Producto sin descripción"</code></td><td>regla encapsulada en <code>Product.DescriptionOrDefault()</code></td></tr>
+      <tr><td><code>category</code></td><td>string(100)</td><td>NOT NULL</td><td><b>shard key</b> en mongo · filtro común en /search</td></tr>
+      <tr><td><code>price</code></td><td>decimal(10,2)</td><td>CHECK &gt; 0</td><td></td></tr>
+      <tr><td><code>available</code></td><td>bool</td><td>default true</td><td>si está en false, no indexa en ES</td></tr>
+    </tbody>
+  </table>
+
+  <div class="entity-title">
+    <h3>Reservation</h3>
+    <span class="meta">· <code>reservations</code> · <b>sharded</b> en mongo por <code>restaurant_id</code> (hashed)</span>
+  </div>
+  <table class="schema">
+    <thead><tr><th>Campo</th><th>Tipo</th><th>Reglas</th><th>Notas</th></tr></thead>
+    <tbody>
+      <tr><td class="pk"><code>id</code></td><td>UUID</td><td>PK</td><td></td></tr>
+      <tr><td class="fk"><code>restaurant_id</code></td><td>UUID</td><td>FK → restaurants, ON DELETE CASCADE</td><td>shard key · la mayoría de queries filtran por restaurante</td></tr>
+      <tr><td class="fk"><code>user_id</code></td><td>UUID</td><td>FK → users, ON DELETE CASCADE</td><td>viene SIEMPRE del JWT, nunca del body</td></tr>
+      <tr><td><code>date</code></td><td>timestamptz</td><td>NOT NULL, debe ser futuro</td><td>validación en service</td></tr>
+      <tr><td><code>party_size</code></td><td>int</td><td>CHECK &gt; 0</td><td>debe ser ≤ <code>restaurant.capacity</code> disponible</td></tr>
+      <tr><td><code>status</code></td><td>enum</td><td><code>pending</code> | <code>confirmed</code> | <code>cancelled</code></td><td>default <code>pending</code></td></tr>
+      <tr><td><code>notes</code></td><td>text</td><td>opcional</td><td></td></tr>
+      <tr><td><code>created_at</code></td><td>timestamptz</td><td>default NOW()</td><td></td></tr>
+    </tbody>
+  </table>
+
+  <div class="entity-title">
+    <h3>Order + OrderItem</h3>
+    <span class="meta">· <code>orders</code> + <code>order_items</code> en pg · items embebidos en mongo</span>
+  </div>
+  <table class="schema">
+    <thead><tr><th>Campo</th><th>Tipo</th><th>Reglas</th><th>Notas</th></tr></thead>
+    <tbody>
+      <tr><td class="pk"><code>id</code></td><td>UUID</td><td>PK</td><td></td></tr>
+      <tr><td class="fk"><code>user_id</code></td><td>UUID</td><td>FK → users, ON DELETE RESTRICT</td><td>histórico preservado si se borra user</td></tr>
+      <tr><td class="fk"><code>restaurant_id</code></td><td>UUID</td><td>FK → restaurants, ON DELETE RESTRICT</td><td></td></tr>
+      <tr><td class="fk"><code>reservation_id</code></td><td>UUID?</td><td>FK → reservations, ON DELETE SET NULL</td><td>opcional: puede haber órdenes sin reserva (takeaway)</td></tr>
+      <tr><td><code>total</code></td><td>decimal(10,2)</td><td>default 0</td><td>calculado en service, no confiar en el cliente</td></tr>
+      <tr><td><code>status</code></td><td>enum</td><td><code>pending</code> | <code>confirmed</code> | <code>cancelled</code></td><td></td></tr>
+      <tr><td><code>pickup</code></td><td>bool</td><td>default false</td><td>true = para llevar; false = comer en el local</td></tr>
+      <tr><td><code>items</code></td><td>array&lt;OrderItem&gt;</td><td>NOT NULL, min 1</td><td><b>pg</b>: tabla <code>order_items</code>. <b>mongo</b>: array embebido.</td></tr>
+    </tbody>
+  </table>
+  <table class="schema" style="margin-top: 8px;">
+    <thead><tr><th>OrderItem</th><th>Tipo</th><th>Reglas</th><th>Notas</th></tr></thead>
+    <tbody>
+      <tr><td class="fk"><code>product_id</code></td><td>UUID</td><td>FK → products, ON DELETE RESTRICT</td><td>se conserva el item aunque el producto se borre del menú</td></tr>
+      <tr><td><code>quantity</code></td><td>int</td><td>CHECK &gt; 0</td><td></td></tr>
+      <tr><td><code>price</code></td><td>decimal(10,2)</td><td>NOT NULL</td><td><b>snapshot</b>: se copia el precio del producto en el momento. Si el producto sube de precio, la orden vieja no cambia.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="notes">
+    <h2>Reglas invariantes del modelo</h2>
+    <ul>
+      <li><b>UUIDs siempre</b>, tanto en pg como en mongo. Garantiza que el mismo registro pueda moverse entre motores sin reasignar IDs.</li>
+      <li><b>Mismo struct Go, dos tags</b>: <code>db:"..."</code> y <code>bson:"..."</code>. No hay DTOs por motor — la entidad vive en <code>internal/domain/</code> una sola vez.</li>
+      <li><b>TIMESTAMPTZ en pg</b>, <code>time.Time</code> en Go, <code>ISODate</code> en mongo. Zonas horarias siempre explícitas.</li>
+      <li><b>Precios como DECIMAL(10,2)</b> en pg para evitar <code>float</code>. En Go se usa <code>float64</code> pero se formatea a 2 decimales al persistir.</li>
+      <li><b>Anti-overlap de reservas</b>: en pg se valida con un EXCLUDE USING gist (ver diagrama 5); en mongo, con un índice parcial único (<code>restaurant_id + date + party_size</code>).</li>
+      <li><b>Shard keys</b>: <code>products.category</code> y <code>reservations.restaurant_id</code>, ambas <b>hashed</b>. Balancean escrituras y mantienen los reads comunes en un solo shard.</li>
+      <li><b>Cascades pensadas</b>: borrar un restaurante borra en cascada menús, productos y reservas; borrar un user NO borra sus órdenes (queda histórico).</li>
+      <li><b>Snapshot de precio en OrderItem</b>: regla de negocio, no de BD. Las órdenes históricas son inmutables aunque cambie el catálogo.</li>
+    </ul>
+  </div>
+</main>
+</body>
+</html>

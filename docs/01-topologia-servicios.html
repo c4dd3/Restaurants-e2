@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>1 · Topología de servicios</title>
+<link rel="stylesheet" href="styles.css">
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({
+    startOnLoad: true, theme: 'base',
+    themeVariables: {
+      background: '#ffffff',
+      mainBkg: '#f8fafc',
+      nodeBorder: '#64748b',
+      clusterBkg: '#f1f5f9',
+      clusterBorder: '#cbd5e1',
+      primaryTextColor: '#0f172a',
+      lineColor: '#94a3b8',
+      fontFamily: 'Inter, system-ui, sans-serif',
+      fontSize: '14px'
+    },
+    flowchart: { curve: 'basis', padding: 16, nodeSpacing: 40, rankSpacing: 55, useMaxWidth: true }
+  });
+</script>
+</head>
+<body>
+
+<nav class="top">
+  <a class="home" href="index.html">← Índice</a>
+  <span class="nav-links">
+    <a href="02-hexagonal-dao.html">siguiente →</a>
+  </span>
+</nav>
+
+<main>
+  <header class="page">
+    <h1><span class="tag">1</span> Topología de servicios</h1>
+    <p class="lead">Tres microservicios detrás de un balanceador Nginx. Comparten código únicamente vía paquetes bajo <code>internal/</code>.</p>
+  </header>
+
+  <div class="canvas">
+<pre class="mermaid">
+flowchart LR
+  subgraph client["Frontend / clientes"]
+    FE[SPA o Postman]
+  end
+
+  LB["nginx :80<br/>único punto de entrada<br/>/auth/** /api/** /search/**"]
+
+  subgraph services["Microservicios (procesos)"]
+    direction TB
+    AUTH["cmd/auth<br/><i>:8081</i><br/>/auth/register · /auth/login"]
+    API["cmd/api<br/><i>:8080</i><br/>/users · /restaurants · /menus<br/>/products · /reservations · /orders"]
+    SEARCH["cmd/search<br/><i>:8082</i><br/>/search/products · /search/reindex"]
+  end
+
+  subgraph shared["internal/ — paquetes compartidos"]
+    direction LR
+    DOMAIN[[internal/domain<br/>entities + DTOs]]
+    PORTS[[internal/ports<br/>interfaces]]
+    AUTHPKG[[internal/auth<br/>jwt + bcrypt]]
+    WIRING[[internal/wiring<br/>engine switch]]
+  end
+
+  subgraph data["Infra de datos"]
+    PG[(Postgres<br/>o Mongo sharded)]
+    RD[(Redis<br/>cache)]
+    ES[(Elasticsearch<br/>índice products)]
+  end
+
+  FE -->|HTTP+JWT| LB
+  LB -->|/auth/**| AUTH
+  LB -->|/api/**| API
+  LB -->|/search/**| SEARCH
+
+  AUTH -. importa .-> AUTHPKG
+  AUTH -. importa .-> WIRING
+  AUTH -. importa .-> DOMAIN
+  API  -. importa .-> AUTHPKG
+  API  -. importa .-> WIRING
+  API  -. importa .-> DOMAIN
+  API  -. importa .-> PORTS
+  SEARCH -. importa .-> AUTHPKG
+  SEARCH -. importa .-> DOMAIN
+
+  AUTH -->|repos| PG
+  API  -->|repos| PG
+  API  -->|cache| RD
+  SEARCH -->|read/index| ES
+  API  -.indexa productos.-> ES
+
+  classDef svc fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
+  classDef pkg fill:#d1fae5,stroke:#059669,color:#064e3b
+  classDef data fill:#fef3c7,stroke:#d97706,color:#78350f
+  classDef lb fill:#ede9fe,stroke:#7c3aed,color:#4c1d95
+  class AUTH,API,SEARCH svc
+  class DOMAIN,PORTS,AUTHPKG,WIRING pkg
+  class PG,RD,ES data
+  class LB lb
+</pre>
+    <div class="legend">
+      <span><i style="background:#ede9fe;border-color:#7c3aed"></i>Load balancer</span>
+      <span><i style="background:#dbeafe;border-color:#2563eb"></i>Microservicios</span>
+      <span><i style="background:#d1fae5;border-color:#059669"></i>Paquetes internal/</span>
+      <span><i style="background:#fef3c7;border-color:#d97706"></i>Infra de datos</span>
+    </div>
+  </div>
+
+  <div class="notes">
+    <h2>Claves de diseño</h2>
+    <ul>
+      <li><b>Nginx al frente (requisito del enunciado, §6)</b>: único puerto expuesto al host. Los tres servicios no publican puertos — solo el balanceador. Esto habilita <code>docker compose up --scale api=3 --scale search=2</code> y cumple el 15% de la rúbrica.</li>
+      <li><b>Mismo secret JWT</b> en los 3 servicios (<code>JWT_SECRET</code>): auth lo firma, api y search lo verifican. Stateless → ninguno comparte sesión.</li>
+      <li><b><code>internal/auth</code></b> elimina la duplicación de lógica de tokens/bcrypt entre <code>cmd/auth</code> y el middleware de <code>cmd/api</code>.</li>
+      <li><b><code>internal/wiring</code></b> centraliza la decisión de motor. <code>cmd/search</code> NO lo usa: ElasticSearch es su única fuente.</li>
+      <li><b>Indexación a ES</b>: escribe <code>cmd/api</code> (como side-effect del service al crear/actualizar producto). Lee <code>cmd/search</code>. Patrón CQRS-lite.</li>
+    </ul>
+  </div>
+</main>
+</body>
+</html>

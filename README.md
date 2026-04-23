@@ -65,9 +65,6 @@ restaurants-e2/
 │   ├── nginx/nginx.conf
 │   ├── mongo/init-cluster.sh
 │   └── postgres/init.sql
-├── test/
-│   ├── integration/  # Testcontainers
-│   └── fixtures/     # Datos generados por LLM
 ├── scripts/seed/     # Generador de datos realistas
 ├── .github/workflows/ci.yml
 ├── Dockerfile.api | Dockerfile.auth | Dockerfile.search
@@ -147,18 +144,13 @@ make scale-api N=3
 
 ## Testing
 
-```bash
-make test            # Todos los tests con cobertura (meta: ≥ 90%)
-make test-unit       # Solo unitarios (rápidos, sin BD)
-make test-integration # Integración (usa testcontainers — requiere Docker)
-make cover           # Genera reporte HTML en coverage.html
-```
+Pospuesto a la fase final. Cuando se agregue, la suite correrá contra los mismos ports que consume `service/`, de forma que pg-adapter y mongo-adapter se validen con los mismos casos.
 
 ## CI/CD
 
 El pipeline vive en `.github/workflows/ci.yml` y en cada push:
 
-1. Corre `go vet` + staticcheck + tests con cobertura (falla si cobertura < 90%).
+1. Corre `go vet` + staticcheck sobre todo el árbol.
 2. Construye las 3 imágenes Docker en paralelo (matrix strategy).
 3. Solo en push a `main`: publica las imágenes a `ghcr.io/<owner>/<repo>/<servicio>:latest` y `:<sha>`.
 
@@ -172,9 +164,14 @@ make seed
 
 ## Documentación adicional
 
-- `docs/architecture.md` — diagramas y decisiones arquitectónicas (ADR).
-- `docs/api.md` — contrato detallado de endpoints.
-- `docs/deployment.md` — topología de producción y operación.
+Abrí `docs/index.html` en el navegador (o serví la carpeta con `python -m http.server` desde `docs/`). Navega seis diagramas:
+
+1. **Topología de servicios** — cómo se relacionan los 3 binarios con Nginx al frente.
+2. **Hexagonal + DAO** — núcleo, ports y adapters con zoom a un DAO concreto.
+3. **Dependencias de paquetes** — qué puede importar qué en Go.
+4. **El único `if` del motor** — cómo `wiring.NewRepositories` concentra la decisión pg/mongo.
+5. **Ciclo de vida de un request** — `POST /reservations` paso a paso.
+6. **Topología de despliegue** — contenedores, red y puertos del compose.
 
 ---
 

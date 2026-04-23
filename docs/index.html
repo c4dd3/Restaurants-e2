@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Restaurants-e2 · Arquitectura</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<nav class="top">
+  <span class="home">Restaurants-e2 · Arquitectura</span>
+  <span class="nav-links"></span>
+</nav>
+
+<main>
+  <header class="page">
+    <h1>Arquitectura — Etapa 2</h1>
+    <p class="lead">
+      Tres microservicios (api · auth · search) detrás de un balanceador Nginx,
+      un solo motor de BD por run (postgres o mongo), arquitectura hexagonal con
+      sub-DAOs por adapter. Cada diagrama vive en su propia página para que se lea cómodo.
+    </p>
+  </header>
+
+  <section class="cards">
+
+    <a class="card" href="01-topologia-servicios.html">
+      <span class="num">1</span>
+      <h3>Topología de servicios</h3>
+      <p>Cómo los tres binarios se relacionan entre sí y con Nginx al frente. Qué paquetes de <code>internal/</code> comparten.</p>
+    </a>
+
+    <a class="card" href="02-hexagonal-dao.html">
+      <span class="num">2</span>
+      <h3>Hexagonal + DAO</h3>
+      <p>Núcleo (service + domain) rodeado de ports (DAO padres) y adapters (sub-DAOs pg/mongo). Reglas de dependencia.</p>
+    </a>
+
+    <a class="card" href="03-dependencias-paquetes.html">
+      <span class="num">3</span>
+      <h3>Dependencias de paquetes</h3>
+      <p>Grafo de imports Go permitidos. Qué puede importar qué. <code>wiring</code> es la excepción a la regla.</p>
+    </a>
+
+    <a class="card" href="04-switch-motor.html">
+      <span class="num">4</span>
+      <h3>El único <code>if</code> del motor</h3>
+      <p>Cómo <code>wiring.NewRepositories</code> concentra la decisión postgres vs mongo en un solo lugar del código.</p>
+    </a>
+
+    <a class="card" href="05-ciclo-request.html">
+      <span class="num">5</span>
+      <h3>Ciclo de vida de un request</h3>
+      <p>Secuencia completa de <code>POST /reservations</code>: middleware, service, port, adapter, constraint GiST, cache.</p>
+    </a>
+
+    <a class="card" href="06-topologia-despliegue.html">
+      <span class="num">6</span>
+      <h3>Topología de despliegue</h3>
+      <p>Docker-compose con nginx al frente, replica sets de Mongo, Redis con LRU y cluster de ElasticSearch.</p>
+    </a>
+
+    <a class="card" href="07-modelo-datos.html">
+      <span class="num">7</span>
+      <h3>Modelo de datos</h3>
+      <p>Siete entidades con sus campos, tipos y reglas. Cómo se mapean a tablas pg (con FK) y a colecciones mongo (con sharding y embeds).</p>
+    </a>
+
+    <a class="card" href="08-api-contrato.html">
+      <span class="num">8</span>
+      <h3>Contrato de API</h3>
+      <p>Todos los endpoints agrupados por servicio: método, path, auth, request body, response body, errores estables.</p>
+    </a>
+
+  </section>
+</main>
+</body>
+</html>

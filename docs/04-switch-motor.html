@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>4 · El único if del motor</title>
+<link rel="stylesheet" href="styles.css">
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({
+    startOnLoad: true, theme: 'base',
+    themeVariables: {
+      background: '#ffffff',
+      mainBkg: '#f8fafc',
+      nodeBorder: '#64748b',
+      clusterBkg: '#f1f5f9',
+      clusterBorder: '#cbd5e1',
+      primaryTextColor: '#0f172a',
+      lineColor: '#94a3b8',
+      fontFamily: 'Inter, system-ui, sans-serif',
+      fontSize: '14px'
+    },
+    flowchart: { curve: 'basis', padding: 16, nodeSpacing: 40, rankSpacing: 55, useMaxWidth: true }
+  });
+</script>
+</head>
+<body>
+
+<nav class="top">
+  <a class="home" href="index.html">← Índice</a>
+  <span class="nav-links">
+    <a href="03-dependencias-paquetes.html">← anterior</a>
+    <a href="05-ciclo-request.html">siguiente →</a>
+  </span>
+</nav>
+
+<main>
+  <header class="page">
+    <h1><span class="tag">4</span> El único <code>if</code> del motor · <code>wiring.NewRepositories</code></h1>
+    <p class="lead">Requisito del enunciado (§3): una sola condición decide el motor. Esta función la concentra; los binarios la llaman.</p>
+  </header>
+
+  <div class="canvas">
+<pre class="mermaid">
+flowchart TB
+  START(["main() en cmd/api o cmd/auth"])
+  LOAD["config.Load()<br/>lee env DB_ENGINE"]
+  CALL["wiring.NewRepositories(ctx, cfg)"]
+  SWITCH{"switch<br/>cfg.Engine"}
+
+  PG_PATH["repopg.NewPool(ctx, cfg.Postgres)<br/>↓<br/>repopg.NewRepositories(pool)<br/>↓<br/>closer = pool.Close()"]
+  MO_PATH["repomongo.NewClient(ctx, cfg.Mongo)<br/>↓<br/>repomongo.NewRepositories(client, db)<br/>↓<br/>closer = client.Disconnect(ctx)"]
+  ERR["return fmt.Errorf('engine no soportado: %q')"]
+
+  RET["Devuelve (*ports.Repositories, CloseFunc, error)"]
+  WIRE["main usa los repos con<br/>service.NewFooService(repos.Foo, ...)"]
+  SHUTDOWN["defer closer(ctx)<br/>cierra pool/client al SIGTERM"]
+
+  START --> LOAD --> CALL --> SWITCH
+  SWITCH -- "postgres" --> PG_PATH --> RET
+  SWITCH -- "mongo" --> MO_PATH --> RET
+  SWITCH -- "otro" --> ERR
+  RET --> WIRE
+  WIRE --> SHUTDOWN
+
+  classDef start fill:#d1fae5,stroke:#059669,color:#064e3b
+  classDef decision fill:#ffedd5,stroke:#ea580c,color:#7c2d12
+  classDef path fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
+  classDef err fill:#fee2e2,stroke:#dc2626,color:#7f1d1d
+  class START,SHUTDOWN start
+  class SWITCH decision
+  class PG_PATH,MO_PATH,RET,WIRE,LOAD,CALL path
+  class ERR err
+</pre>
+    <div class="legend">
+      <span><i style="background:#d1fae5;border-color:#059669"></i>Entrada / salida</span>
+      <span><i style="background:#ffedd5;border-color:#ea580c"></i>Decisión</span>
+      <span><i style="background:#dbeafe;border-color:#2563eb"></i>Caminos felices</span>
+      <span><i style="background:#fee2e2;border-color:#dc2626"></i>Error</span>
+    </div>
+  </div>
+
+  <div class="notes">
+    <h2>Por qué este diseño cumple literal el requisito</h2>
+    <ul>
+      <li><b>Un solo <code>switch</code></b> en todo el código. Búsqueda <code>grep -rn "cfg.Engine"</code> devuelve una línea.</li>
+      <li>Los servicios <b>no saben</b> qué motor se eligió. Reciben <code>ports.UserRepository</code>, punto.</li>
+      <li><b>Agregar un motor</b> (ej. cockroach) = agregar un case + un adapter. Cero cambios en service/transport.</li>
+      <li><b>CloseFunc</b> abstrae el cleanup: Postgres cierra un pool (sync), Mongo hace Disconnect (async con ctx). El main no distingue.</li>
+    </ul>
+  </div>
+</main>
+</body>
+</html>

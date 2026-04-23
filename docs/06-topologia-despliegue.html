@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>6 · Topología de despliegue</title>
+<link rel="stylesheet" href="styles.css">
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({
+    startOnLoad: true, theme: 'base',
+    themeVariables: {
+      background: '#ffffff',
+      mainBkg: '#f8fafc',
+      nodeBorder: '#64748b',
+      clusterBkg: '#f1f5f9',
+      clusterBorder: '#cbd5e1',
+      primaryTextColor: '#0f172a',
+      lineColor: '#94a3b8',
+      fontFamily: 'Inter, system-ui, sans-serif',
+      fontSize: '14px'
+    },
+    flowchart: { curve: 'basis', padding: 16, nodeSpacing: 40, rankSpacing: 55, useMaxWidth: true }
+  });
+</script>
+</head>
+<body>
+
+<nav class="top">
+  <a class="home" href="index.html">← Índice</a>
+  <span class="nav-links">
+    <a href="05-ciclo-request.html">← anterior</a>
+    <a href="07-modelo-datos.html">siguiente →</a>
+  </span>
+</nav>
+
+<main>
+  <header class="page">
+    <h1><span class="tag">6</span> Topología de despliegue · docker-compose</h1>
+    <p class="lead">Qué containers corren, qué red los une y cuáles son los puertos expuestos al host.</p>
+  </header>
+
+  <div class="canvas">
+<pre class="mermaid">
+flowchart TB
+  USER[/Dev o Tester/]
+
+  subgraph NET["docker network: re2_net"]
+    direction TB
+
+    LB["nginx:1.27-alpine<br/>host::80 → :80<br/>único puerto publicado"]
+
+    subgraph APPS["App tier — sin puertos expuestos al host"]
+      direction LR
+      AAPI["app-api<br/>cmd/api :8080<br/>escalable --scale api=N"]
+      AAUTH["app-auth<br/>cmd/auth :8081"]
+      ASRCH["app-search<br/>cmd/search :8082<br/>escalable --scale search=N"]
+    end
+
+    subgraph DATA_PG["Postgres · perfil postgres"]
+      PG[("postgres:16-alpine<br/>:5432 · volumen pgdata")]
+    end
+
+    subgraph DATA_MG["MongoDB sharded · perfil mongo"]
+      direction TB
+      MGS["mongos router :27017"]
+      subgraph SH1["shard1rs"]
+        R1P["primary"]
+        R1S1["secondary"]
+        R1S2["secondary"]
+      end
+      subgraph SH2["shard2rs"]
+        R2P["primary"]
+        R2S1["secondary"]
+        R2S2["secondary"]
+      end
+      CFG_RS["configsvr · cfgrs"]
+      MGS --> SH1
+      MGS --> SH2
+      MGS --> CFG_RS
+    end
+
+    subgraph CACHE_LAYER["Cache"]
+      RED[("redis:7.4-alpine<br/>maxmemory-policy allkeys-lru")]
+    end
+
+    subgraph SEARCH_LAYER["Search"]
+      ESN[("elasticsearch:8.14<br/>índice: products")]
+    end
+
+    LB --> AAPI
+    LB --> AAUTH
+    LB --> ASRCH
+
+    AAUTH --> PG
+    AAUTH --> MGS
+    AAPI  --> PG
+    AAPI  --> MGS
+    AAPI  --> RED
+    AAPI  --> ESN
+    ASRCH --> ESN
+  end
+
+  USER -->|única URL pública| LB
+
+  classDef app fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
+  classDef db fill:#fef3c7,stroke:#d97706,color:#78350f
+  classDef cache fill:#ffedd5,stroke:#ea580c,color:#7c2d12
+  classDef search fill:#d1fae5,stroke:#059669,color:#064e3b
+  classDef lb fill:#ede9fe,stroke:#7c3aed,color:#4c1d95
+  class AAPI,AAUTH,ASRCH app
+  class PG,MGS,R1P,R1S1,R1S2,R2P,R2S1,R2S2,CFG_RS db
+  class RED cache
+  class ESN search
+  class LB lb
+</pre>
+    <div class="legend">
+      <span><i style="background:#ede9fe;border-color:#7c3aed"></i>Nginx LB</span>
+      <span><i style="background:#dbeafe;border-color:#2563eb"></i>App tier</span>
+      <span><i style="background:#fef3c7;border-color:#d97706"></i>Stores (Postgres / Mongo)</span>
+      <span><i style="background:#ffedd5;border-color:#ea580c"></i>Redis cache</span>
+      <span><i style="background:#d1fae5;border-color:#059669"></i>Elasticsearch</span>
+    </div>
+  </div>
+
+  <div class="notes">
+    <h2>Notas de despliegue</h2>
+    <ul>
+      <li><b>Perfiles de compose</b>: <code>--profile postgres</code> o <code>--profile mongo</code> levanta el stack de datos correspondiente. Los app containers reciben <code>DB_ENGINE</code> por env.</li>
+      <li><b>Sharding Mongo</b>: <code>products.category</code> y <code>reservations.restaurant_id</code> como shard key hashed. Replica set 1 primary + 2 secondaries por shard.</li>
+      <li><b>Redis allkeys-lru</b>: evicción automática cuando llena memoria; ningún key es "irremplazable".</li>
+      <li><b>ES</b>: single-node en dev (suficiente para Etapa 2). Cluster 3-node en producción.</li>
+      <li><b>Escalado</b>: <code>docker compose up --scale api=3 --scale search=2</code>. Nginx descubre las réplicas vía DNS de Docker (<code>resolver 127.0.0.11</code>).</li>
+    </ul>
+  </div>
+</main>
+</body>
+</html>

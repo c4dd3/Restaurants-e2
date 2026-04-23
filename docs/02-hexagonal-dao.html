@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>2 · Hexagonal + DAO</title>
+<link rel="stylesheet" href="styles.css">
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({
+    startOnLoad: true, theme: 'base',
+    themeVariables: {
+      background: '#ffffff',
+      mainBkg: '#f8fafc',
+      nodeBorder: '#64748b',
+      clusterBkg: '#f1f5f9',
+      clusterBorder: '#cbd5e1',
+      primaryTextColor: '#0f172a',
+      lineColor: '#94a3b8',
+      fontFamily: 'Inter, system-ui, sans-serif',
+      fontSize: '14px'
+    },
+    flowchart: { curve: 'basis', padding: 18, nodeSpacing: 45, rankSpacing: 55, useMaxWidth: true }
+  });
+</script>
+</head>
+<body>
+
+<nav class="top">
+  <a class="home" href="index.html">← Índice</a>
+  <span class="nav-links">
+    <a href="01-topologia-servicios.html">← anterior</a>
+    <a href="03-dependencias-paquetes.html">siguiente →</a>
+  </span>
+</nav>
+
+<main>
+  <header class="page">
+    <h1><span class="tag">2</span> Arquitectura hexagonal · DAO padre / sub-DAOs</h1>
+    <p class="lead">El núcleo no conoce ninguna tecnología concreta: habla con <b>ports</b> (los DAO padres). Los <b>adapters</b> (sub-DAOs) son los que implementan esos contratos para Postgres, Mongo, Redis o ElasticSearch.</p>
+  </header>
+
+  <div class="canvas-label">Vista general — capas del hexágono</div>
+  <div class="canvas">
+<pre class="mermaid">
+flowchart TB
+  subgraph DRIVING["Driving side · entrantes"]
+    direction LR
+    HTTP["transport/http<br/>Gin handlers"]
+    MW["middleware<br/>AuthMiddleware"]
+  end
+
+  subgraph CORE["Núcleo · 100% agnóstico de infraestructura"]
+    direction TB
+    SVC["service/<br/>Auth · User · Restaurant · Menu · Product · Reservation · Order"]
+    DOM["domain/<br/>entidades + errores de dominio"]
+    PORTS["ports/<br/>6× Repository + Cache + SearchIndex<br/>(los DAO padres · interfaces Go)"]
+  end
+
+  subgraph DRIVEN["Driven side · adapters agrupados por tecnología"]
+    direction LR
+    ADPG["adapters/repopg/<br/><b>6 sub-DAOs</b><br/>User · Restaurant · Menu<br/>Product · Reservation · Order"]
+    ADMO["adapters/repomongo/<br/><b>6 sub-DAOs</b><br/>User · Restaurant · Menu<br/>Product · Reservation · Order"]
+    ADRD["adapters/cacheredis/<br/><b>1 sub-DAO</b><br/>CacheRedis"]
+    ADES["adapters/searches/<br/><b>1 sub-DAO</b><br/>SearchES"]
+  end
+
+  HTTP --> SVC
+  MW   --> SVC
+  SVC  --> PORTS
+  SVC  --> DOM
+  PORTS --> DOM
+
+  ADPG -. implementa 6 ports .-> PORTS
+  ADMO -. implementa 6 ports .-> PORTS
+  ADRD -. implementa Cache .-> PORTS
+  ADES -. implementa SearchIndex .-> PORTS
+
+  classDef core fill:#d1fae5,stroke:#059669,color:#064e3b
+  classDef port fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
+  classDef adapter fill:#fef3c7,stroke:#d97706,color:#78350f
+  classDef outer fill:#ede9fe,stroke:#7c3aed,color:#4c1d95
+  class SVC,DOM core
+  class PORTS port
+  class ADPG,ADMO,ADRD,ADES adapter
+  class HTTP,MW outer
+</pre>
+    <div class="legend">
+      <span><i style="background:#ede9fe;border-color:#7c3aed"></i>Driving · HTTP + middleware</span>
+      <span><i style="background:#d1fae5;border-color:#059669"></i>Núcleo · service + domain</span>
+      <span><i style="background:#dbeafe;border-color:#2563eb"></i>Ports · DAO padre</span>
+      <span><i style="background:#fef3c7;border-color:#d97706"></i>Adapters · sub-DAOs</span>
+    </div>
+  </div>
+
+  <div class="canvas-label">Zoom · cómo un DAO padre se convierte en dos sub-DAOs concretos</div>
+  <div class="canvas">
+<pre class="mermaid">
+flowchart LR
+  SVC["UserService<br/>(service/user.go)"]
+  PORT["ports.UserRepository<br/>interface:<br/>Create · ByID · ByEmail · Update · Delete"]
+  PG["repopg.UserRepoPg<br/>usa pgxpool.Pool<br/>SQL nativo"]
+  MO["repomongo.UserRepoMongo<br/>usa *mongo.Collection<br/>filtros BSON"]
+  DB1[("Postgres<br/>tabla users")]
+  DB2[("MongoDB<br/>colección users")]
+
+  SVC -->|"depende de la<br/>interfaz, no de<br/>una implementación"| PORT
+  PG -. "var _ ports.UserRepository<br/>= (*UserRepoPg)(nil)" .-> PORT
+  MO -. "var _ ports.UserRepository<br/>= (*UserRepoMongo)(nil)" .-> PORT
+  PG --> DB1
+  MO --> DB2
+
+  classDef core fill:#d1fae5,stroke:#059669,color:#064e3b
+  classDef port fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
+  classDef adapter fill:#fef3c7,stroke:#d97706,color:#78350f
+  classDef store fill:#fce7f3,stroke:#be185d,color:#831843
+  class SVC core
+  class PORT port
+  class PG,MO adapter
+  class DB1,DB2 store
+</pre>
+    <div class="legend">
+      <span>Este zoom se repite 6 veces (una por entidad): Restaurant, Menu, Product, Reservation, Order, User.</span>
+    </div>
+  </div>
+
+  <div class="notes">
+    <h2>Reglas invariantes</h2>
+    <ul>
+      <li><span class="rule">Nunca</span> <code>service</code> importa de <code>adapters</code>. El compilador lo impide si rompemos esto (ver diagrama 3).</li>
+      <li>Verificación en compile-time por adapter: <code>var _ ports.UserRepository = (*UserRepoPg)(nil)</code>. Si al adapter le falta un método del contrato, no compila.</li>
+      <li>El paquete <code>domain</code> no importa nada salvo stdlib — es el "centro" del hexágono y no debe saber que existen HTTP, SQL o BSON.</li>
+      <li><b>DAO padre = interface en <code>ports/</code></b>. <b>Sub-DAO = struct en <code>adapters/...</code></b> que la implementa. El mismo padre tiene 2 hijos (pg/mongo); ambos responden al mismo contrato, por lo que el service es intercambiable.</li>
+      <li>Agregar un tercer motor (ej. <code>cockroach</code>) = crear <code>adapters/repocock/</code> con 6 sub-DAOs y un case más en <code>wiring</code>. Cero cambios en <code>service/</code>.</li>
+    </ul>
+  </div>
+</main>
+</body>
+</html>
