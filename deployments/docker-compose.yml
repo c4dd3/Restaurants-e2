@@ -244,6 +244,8 @@ services:
       - discovery.type=single-node
       - xpack.security.enabled=false   # Simplifica el desarrollo; en prod siempre ON.
       - ES_JAVA_OPTS=-Xms512m -Xmx512m # Limita JVM para no comerse la RAM del host.
+    ports:
+      - "9200:9200"
     ulimits:
       memlock:
         soft: -1
