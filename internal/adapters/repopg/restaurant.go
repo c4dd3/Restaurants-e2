@@ -1,32 +1,81 @@
 package repopg
 
-// restaurant.go — sub-DAO de restaurantes para Postgres.
-//
-// Struct:  type RestaurantRepoPg struct { pool *pgxpool.Pool }
-// Verify:  var _ ports.RestaurantRepository = (*RestaurantRepoPg)(nil)
-//
-// Tabla: restaurants
-// Columnas: id, name, address, phone, description, capacity, created_at, updated_at.
-//
-// Métodos:
-//
-// Create(ctx, r) error
-//   INSERT INTO restaurants (id, name, address, phone, description, capacity)
-//   VALUES ($1, $2, $3, $4, $5, $6)
-//   RETURNING created_at, updated_at;
-//   Generar uuid si r.ID está vacío.
-//
-// FindByID(ctx, id) (*domain.Restaurant, error)
-//   SELECT * FROM restaurants WHERE id = $1;
-//   pgx.ErrNoRows → devolver nil, nil.
-//
-// FindAll(ctx) ([]domain.Restaurant, error)
-//   SELECT * FROM restaurants ORDER BY created_at DESC;
-//   Collect con pgx.CollectRows(rows, pgx.RowToStructByName[domain.Restaurant]).
-//   Si no hay filas → devolver slice vacío, NO nil (evita nil checks upstream).
-//
-// Consideraciones:
-//   - No hay caché acá: la cache-aside vive en el service, no en el repo.
-//     El sub-DAO es "tonto": recibe query, ejecuta, mapea, devuelve.
-//   - Si en el futuro se agrega paginación, la firma de FindAll cambia al
-//     port primero, y luego todos los sub-DAOs (pg y mongo) la implementan.
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"restaurants-e2/internal/domain"
+	"restaurants-e2/internal/ports"
+)
+
+var _ ports.RestaurantRepository = (*RestaurantRepoPg)(nil)
+
+type RestaurantRepoPg struct {
+	pool *pgxpool.Pool
+}
+
+func NewRestaurantRepoPg(pool *pgxpool.Pool) *RestaurantRepoPg {
+	return &RestaurantRepoPg{pool: pool}
+}
+
+// Create inserta un restaurante. El ID debe venir generado desde la capa de servicio.
+func (r *RestaurantRepoPg) Create(ctx context.Context, rest *domain.Restaurant) error {
+	const q = `
+		INSERT INTO restaurants (id, name, address, phone, description, admin_id, capacity, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+		RETURNING created_at, updated_at`
+
+	err := r.pool.QueryRow(ctx, q,
+		rest.ID, rest.Name, rest.Address, rest.Phone,
+		rest.Description, rest.AdminID, rest.Capacity,
+	).Scan(&rest.CreatedAt, &rest.UpdatedAt)
+	if err != nil {
+		return pgErr(err)
+	}
+	return nil
+}
+
+func (r *RestaurantRepoPg) FindByID(ctx context.Context, id string) (*domain.Restaurant, error) {
+	const q = `
+		SELECT id, name, address, phone, description, admin_id, capacity, created_at, updated_at
+		FROM restaurants WHERE id = $1`
+
+	rows, err := r.pool.Query(ctx, q, id)
+	if err != nil {
+		return nil, fmt.Errorf("query restaurant: %w", err)
+	}
+	rest, err := pgx.CollectOneRow(rows, pgx.RowToStructByName[domain.Restaurant])
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, domain.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("collect restaurant: %w", err)
+	}
+	return &rest, nil
+}
+
+// FindAll retorna todos los restaurantes ordenados por fecha de creación descendente.
+// Garantiza slice no-nil — retorna []domain.Restaurant{} si no hay registros.
+func (r *RestaurantRepoPg) FindAll(ctx context.Context) ([]domain.Restaurant, error) {
+	const q = `
+		SELECT id, name, address, phone, description, admin_id, capacity, created_at, updated_at
+		FROM restaurants
+		ORDER BY created_at DESC`
+
+	rows, err := r.pool.Query(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("query restaurants: %w", err)
+	}
+	restaurants, err := pgx.CollectRows(rows, pgx.RowToStructByName[domain.Restaurant])
+	if err != nil {
+		return nil, fmt.Errorf("collect restaurants: %w", err)
+	}
+	if restaurants == nil {
+		return []domain.Restaurant{}, nil
+	}
+	return restaurants, nil
+}

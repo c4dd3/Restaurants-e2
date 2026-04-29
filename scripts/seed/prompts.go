@@ -1,3 +1,5 @@
+//go:build ignore
+
 package main
 
 // prompts.go — templates de prompts para el LLM.

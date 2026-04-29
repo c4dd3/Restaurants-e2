@@ -1,12 +1,3 @@
-// Command api es el microservicio principal: CRUD de restaurantes, menús,
-// productos, reservas y órdenes. Es agnóstico del motor de BD — se elige
-// vía DB_ENGINE.
-//
-// Responsabilidades:
-//   - Cargar config, elegir adaptador Postgres o Mongo.
-//   - Inicializar cliente Redis (caché) y router Gin.
-//   - Exponer /health para que el balanceador sepa cuándo incluir esta réplica.
-//   - Shutdown elegante al recibir SIGTERM (importante en contenedores).
 package main
 
 import (
@@ -21,7 +12,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"restaurants-e2/internal/adapters/repopg"
 	"restaurants-e2/internal/config"
+	"restaurants-e2/internal/ports"
 )
 
 func main() {
@@ -29,14 +22,18 @@ func main() {
 	if err != nil {
 		log.Fatalf("[api] config inválida: %v", err)
 	}
-
-	// TODO(wiring):
-	//   - Según cfg.Engine, construir un ports.Repositories con repopg o repomongo.
-	//   - Instanciar cacheredis.New(cfg.Redis) y pasarlo al layer de servicio.
-	//   - Crear services con repos + cache, y registrar rutas en transport/http.
-	//
-	// Este scaffolding levanta el servidor con solo /health para validar que la infra funciona.
 	log.Printf("[api] motor de BD seleccionado: %s", cfg.Engine)
+
+	ctx := context.Background()
+
+	repos, cleanup, err := buildRepositories(ctx, cfg)
+	if err != nil {
+		log.Fatalf("[api] no se pudo conectar a la base de datos: %v", err)
+	}
+	defer cleanup()
+
+	// TODO: instanciar services con repos y registrar rutas en transport/http.
+	_ = repos
 
 	gin.SetMode(cfg.HTTP.GinMode)
 	r := gin.New()
@@ -60,9 +57,29 @@ func main() {
 	runWithGracefulShutdown(srv, "api")
 }
 
+// buildRepositories conecta al motor de BD elegido y devuelve los repos listos.
+// cleanup debe llamarse con defer para liberar conexiones al apagar el servidor.
+func buildRepositories(ctx context.Context, cfg *config.Config) (*ports.Repositories, func(), error) {
+	switch cfg.Engine {
+	case config.EnginePostgres:
+		pool, err := repopg.NewPool(ctx, cfg.Postgres)
+		if err != nil {
+			return nil, nil, err
+		}
+		repos := repopg.NewRepositories(pool)
+		return repos, pool.Close, nil
+
+	case config.EngineMongo:
+		// TODO: instanciar repomongo cuando esté implementado.
+		return nil, nil, errors.New("motor mongo aún no implementado")
+
+	default:
+		return nil, nil, fmt.Errorf("motor desconocido: %s", cfg.Engine)
+	}
+}
+
 // runWithGracefulShutdown levanta el servidor y atiende señales de sistema
-// para hacer shutdown ordenado — evita cortar requests en vuelo cuando el
-// contenedor se reinicia (importante con escalado horizontal).
+// para hacer shutdown ordenado — evita cortar requests en vuelo.
 func runWithGracefulShutdown(srv *http.Server, name string) {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
