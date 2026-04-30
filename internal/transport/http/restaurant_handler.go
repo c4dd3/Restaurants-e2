@@ -1,51 +1,73 @@
 package http
 
-// restaurant_handler.go — handlers de /restaurants.
-//
-// Struct:
-//
-//   type RestaurantHandler struct {
-//       svc *service.RestaurantService
-//   }
-//
-// Rutas:
-//
-//   POST /restaurants   (admin only — validado por service)
-//   ──────────────────────
-//   1. var req domain.CreateRestaurantRequest; bind.
-//   2. role := c.GetString("role")
-//   3. r, err := h.svc.Create(ctx, req, role)
-//   4. err → http; 201 con restaurant.
-//
-//   GET /restaurants
-//   ──────────────────────
-//   1. Query params opcionales:
-//        limit  = min(c.DefaultQuery("limit", "20"), 100)   ← cap duro
-//        offset = c.DefaultQuery("offset", "0")
-//   2. list, err := h.svc.List(ctx, limit, offset)
-//   3. err → http; 200 con {"items": list, "limit": limit, "offset": offset}.
-//
-//   GET /restaurants/:id
-//   ──────────────────────
-//   1. id := c.Param("id")
-//   2. r, err := h.svc.GetByID(ctx, id)
-//   3. err → http; 200 con restaurant.
-//
-//   PATCH /restaurants/:id   (admin)
-//   ──────────────────────
-//   Bind UpdateRestaurantRequest (agregar a dto.go si falta),
-//   servicio valida role, limpia cache.
-//
-//   DELETE /restaurants/:id  (admin)
-//   ──────────────────────
-//   Servicio ejecuta soft-delete (DELETE físico si cascade conveniente).
-//   204 No Content si éxito.
-//
-// Validaciones importantes:
-//   - :id debe ser UUID válido. Si no, el repo devolverá ErrNotFound y el
-//     cliente recibirá 404 (consistente con "no existe").
-//   - Cap duro de limit=100 previene DoS accidental / scraping.
-//
-// Cache (decisión del service):
-//   - GET /restaurants se sirve desde cache (TTL 60s). El handler ni sabe.
-//   - POST/PATCH/DELETE invalidan cache en el service.
+import (
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+
+	"restaurants-e2/internal/domain"
+	"restaurants-e2/internal/service"
+)
+
+// RestaurantHandler maneja operaciones sobre restaurantes.
+type RestaurantHandler struct {
+	svc *service.RestaurantService
+}
+
+func NewRestaurantHandler(svc *service.RestaurantService) *RestaurantHandler {
+	return &RestaurantHandler{svc: svc}
+}
+
+// Create godoc
+// POST /restaurants
+// Requiere: JWT + role=admin (validado en el service)
+// Body: { name, address, phone, description?, capacity }
+// Response 201: domain.Restaurant
+func (h *RestaurantHandler) Create(c *gin.Context) {
+	userID := c.GetString("user_id")
+	role := c.GetString("role")
+
+	var req domain.CreateRestaurantRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "bad_request", "detail": err.Error()})
+		return
+	}
+
+	restaurant, err := h.svc.Create(c.Request.Context(), userID, role, req)
+	if err != nil {
+		renderError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusCreated, restaurant)
+}
+
+// List godoc
+// GET /restaurants
+// Público (no requiere JWT)
+// Response 200: []domain.Restaurant
+func (h *RestaurantHandler) List(c *gin.Context) {
+	restaurants, err := h.svc.List(c.Request.Context())
+	if err != nil {
+		renderError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"items": restaurants})
+}
+
+// GetByID godoc
+// GET /restaurants/:id
+// Público (no requiere JWT)
+// Response 200: domain.Restaurant
+func (h *RestaurantHandler) GetByID(c *gin.Context) {
+	id := c.Param("id")
+
+	restaurant, err := h.svc.GetByID(c.Request.Context(), id)
+	if err != nil {
+		renderError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, restaurant)
+}

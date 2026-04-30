@@ -1,51 +1,79 @@
 package http
 
-// router.go — ensambla el *gin.Engine con todas las rutas del api-service.
-//
-// Función pública:
-//
-//   NewRouter(deps Deps) *gin.Engine
-//
-// Donde Deps agrupa lo que el router necesita inyectar a los handlers:
-//
-//   type Deps struct {
-//       AuthService        *service.AuthService
-//       UserService        *service.UserService
-//       RestaurantService  *service.RestaurantService
-//       MenuService        *service.MenuService
-//       ProductService     *service.ProductService
-//       ReservationService *service.ReservationService
-//       OrderService       *service.OrderService
-//       SearchService      ports.SearchIndex    // solo para /search/products (lectura)
-//       JWTSecret          string               // para AuthMiddleware
-//   }
-//
-// Construcción:
-//
-//   1. r := gin.New()
-//   2. r.Use(gin.Recovery(), middleware.RequestID(), middleware.Logger(), middleware.CORS())
-//   3. Registrar health:
-//        r.GET("/health", HealthHandler)
-//   4. Grupo público /auth:
-//        auth := r.Group("/auth")
-//        auth.POST("/register", ah.Register)
-//        auth.POST("/login", ah.Login)
-//   5. Grupo protegido (usa AuthMiddleware):
-//        api := r.Group("/")
-//        api.Use(AuthMiddleware(deps.JWTSecret))
-//        api.GET("/users/me", uh.Me)
-//        api.PATCH("/users/me", uh.Update)
-//        api.POST("/restaurants", rh.Create)       // role=admin (validado en service)
-//        api.GET("/restaurants", rh.List)
-//        api.GET("/restaurants/:id", rh.GetByID)
-//        ... etc para menus, products, reservations, orders, search.
-//   6. return r
-//
-// Por qué un solo NewRouter y no múltiples:
-//   - Centraliza el mapa de rutas; fácil de leer en un vistazo.
-//   - Simplifica los tests de integración (un router == un http.Handler).
-//   - Evita que cada handler se registre solo (efecto "spooky action").
-//
-// Por qué NO usar grupos por "module" (ej. r.Group("/restaurants")):
-//   - Lo aceptable pero complica el paso de dependencias. Cada handler es
-//     pequeño, con 2-4 rutas; inline queda legible y plano.
+import (
+	"github.com/gin-gonic/gin"
+
+	"restaurants-e2/internal/service"
+)
+
+// Deps agrupa todas las dependencias que el router necesita para construir los handlers.
+// Se inyectan desde cmd/api/main.go tras el wiring de repos y servicios.
+type Deps struct {
+	AuthService        *service.AuthService
+	UserService        *service.UserService
+	RestaurantService  *service.RestaurantService
+	MenuService        *service.MenuService
+	ReservationService *service.ReservationService
+	OrderService       *service.OrderService
+	JWTSecret          string
+}
+
+// NewRouter construye el *gin.Engine con todas las rutas del api-service.
+// Orden de middlewares: Recovery → RequestID → Logger de Gin.
+func NewRouter(deps Deps) *gin.Engine {
+	r := gin.New()
+	r.Use(gin.Recovery(), gin.Logger(), RequestID())
+
+	// ── Health ──────────────────────────────────────────────────────────────
+	r.GET("/health", func(c *gin.Context) {
+		c.JSON(200, gin.H{"service": "api", "status": "ok"})
+	})
+
+	// ── Handlers ─────────────────────────────────────────────────────────────
+	ah := NewAuthHandler(deps.AuthService)
+	uh := NewUserHandler(deps.UserService)
+	rh := NewRestaurantHandler(deps.RestaurantService)
+	mh := NewMenuHandler(deps.MenuService)
+	resh := NewReservationHandler(deps.ReservationService)
+	oh := NewOrderHandler(deps.OrderService)
+
+	// ── Rutas públicas (sin JWT) ──────────────────────────────────────────────
+	auth := r.Group("/auth")
+	{
+		auth.POST("/register", ah.Register)
+		auth.POST("/login", ah.Login)
+	}
+
+	// GET /restaurants y GET /restaurants/:id son públicos
+	r.GET("/restaurants", rh.List)
+	r.GET("/restaurants/:id", rh.GetByID)
+
+	// ── Rutas protegidas (requieren JWT válido) ───────────────────────────────
+	api := r.Group("/")
+	api.Use(AuthMiddleware(deps.JWTSecret))
+	{
+		// Usuarios
+		api.GET("/users/me", uh.GetMe)
+		api.PUT("/users/:id", uh.Update)
+		api.DELETE("/users/:id", uh.Delete)
+
+		// Restaurantes (solo admin — el service verifica el rol)
+		api.POST("/restaurants", rh.Create)
+
+		// Menús (solo admin — el service verifica el rol)
+		api.POST("/menus", mh.Create)
+		api.GET("/menus/:id", mh.GetByID)
+		api.PUT("/menus/:id", mh.Update)
+		api.DELETE("/menus/:id", mh.Delete)
+
+		// Reservas
+		api.POST("/reservations", resh.Create)
+		api.DELETE("/reservations/:id", resh.Cancel)
+
+		// Órdenes
+		api.POST("/orders", oh.Create)
+		api.GET("/orders/:id", oh.GetByID)
+	}
+
+	return r
+}

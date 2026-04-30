@@ -1,34 +1,81 @@
 package service
 
-// RestaurantService — casos de uso sobre restaurantes.
-//
-// Dependencias:
-//   - ports.RestaurantRepository
-//   - ports.Cache                  (cache-aside para listados)
-//
-// Métodos públicos:
-//
-//   Create(ctx, userRole string, req CreateRestaurantRequest) (*domain.Restaurant, error)
-//     1. Verificar permisos: si userRole != "admin" → ErrForbidden.
-//     2. Construir domain.Restaurant con uuid + timestamps.
-//     3. RestaurantRepository.Create(ctx, &r).
-//     4. Cache.DelByPattern(ctx, "restaurants:*")  — invalida listados cacheados.
-//     5. Devolver el restaurante creado.
-//
-//   GetByID(ctx, id string) (*domain.Restaurant, error)
-//     1. Intentar Cache.Get(ctx, "restaurants:id:"+id, &r).
-//        - si hit (nil err) → devolver.
-//        - si ErrCacheMiss → seguir.
-//     2. RestaurantRepository.FindByID(ctx, id).
-//        - si no existe → ErrNotFound.
-//     3. Cache.Set(ctx, "restaurants:id:"+id, r, 5*time.Minute).
-//     4. Devolver.
-//
-//   List(ctx) ([]domain.Restaurant, error)
-//     Mismo patrón cache-aside con key "restaurants:all".
-//
-// Notas:
-//   - TTL típico de 5 minutos: equilibrio entre frescura y carga de BD.
-//   - El chequeo de admin vive ACÁ y no solo en el middleware, así los tests
-//     unitarios del service pueden validar la regla sin tocar HTTP.
-//   - En Mongo, la colección NO se shardea (pocos restaurantes → colocación OK).
+import (
+	"context"
+	"time"
+
+	"github.com/google/uuid"
+
+	"restaurants-e2/internal/domain"
+	"restaurants-e2/internal/ports"
+)
+
+// RestaurantService gestiona restaurantes con cache-aside en Redis.
+type RestaurantService struct {
+	restaurants ports.RestaurantRepository
+	cache       ports.Cache
+}
+
+// NewRestaurantService construye el servicio inyectando sus dependencias.
+func NewRestaurantService(restaurants ports.RestaurantRepository, cache ports.Cache) *RestaurantService {
+	return &RestaurantService{restaurants: restaurants, cache: cache}
+}
+
+// Create crea un restaurante. Solo admins pueden hacerlo.
+// userID se usa para establecer AdminID del restaurante.
+func (s *RestaurantService) Create(ctx context.Context, userID, userRole string, req domain.CreateRestaurantRequest) (*domain.Restaurant, error) {
+	if userRole != domain.RoleAdmin {
+		return nil, domain.ErrForbidden
+	}
+
+	r := &domain.Restaurant{
+		ID:          uuid.New().String(),
+		Name:        req.Name,
+		Address:     req.Address,
+		Phone:       req.Phone,
+		Description: req.Description,
+		AdminID:     userID,
+		Capacity:    req.Capacity,
+	}
+
+	if err := s.restaurants.Create(ctx, r); err != nil {
+		return nil, err
+	}
+
+	// Invalidar listados cacheados — ya no están actualizados.
+	_ = s.cache.DelByPattern(ctx, "restaurants:*")
+
+	return r, nil
+}
+
+// GetByID devuelve un restaurante por ID con cache-aside (TTL 5 min).
+func (s *RestaurantService) GetByID(ctx context.Context, id string) (*domain.Restaurant, error) {
+	var r domain.Restaurant
+	if err := s.cache.Get(ctx, "restaurants:id:"+id, &r); err == nil {
+		return &r, nil
+	}
+
+	result, err := s.restaurants.FindByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	_ = s.cache.Set(ctx, "restaurants:id:"+id, result, 5*time.Minute)
+	return result, nil
+}
+
+// List devuelve todos los restaurantes con cache-aside (TTL 5 min).
+func (s *RestaurantService) List(ctx context.Context) ([]domain.Restaurant, error) {
+	var list []domain.Restaurant
+	if err := s.cache.Get(ctx, "restaurants:all", &list); err == nil {
+		return list, nil
+	}
+
+	result, err := s.restaurants.FindAll(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	_ = s.cache.Set(ctx, "restaurants:all", result, 5*time.Minute)
+	return result, nil
+}

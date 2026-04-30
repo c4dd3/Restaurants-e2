@@ -12,9 +12,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"restaurants-e2/internal/adapters/cacheredis"
 	"restaurants-e2/internal/adapters/repopg"
 	"restaurants-e2/internal/config"
 	"restaurants-e2/internal/ports"
+	"restaurants-e2/internal/service"
+	transport "restaurants-e2/internal/transport/http"
 )
 
 func main() {
@@ -26,27 +29,40 @@ func main() {
 
 	ctx := context.Background()
 
-	repos, cleanup, err := buildRepositories(ctx, cfg)
+	// ── Repositorios ─────────────────────────────────────────────────────────
+	repos, cleanupRepos, err := buildRepositories(ctx, cfg)
 	if err != nil {
 		log.Fatalf("[api] no se pudo conectar a la base de datos: %v", err)
 	}
-	defer cleanup()
+	defer cleanupRepos()
 
-	// TODO: instanciar services con repos y registrar rutas en transport/http.
-	_ = repos
+	// ── Caché Redis ───────────────────────────────────────────────────────────
+	redisClient, err := cacheredis.NewClient(ctx, cfg.Redis)
+	if err != nil {
+		log.Fatalf("[api] no se pudo conectar a Redis: %v", err)
+	}
+	defer redisClient.Close()
+	cache := cacheredis.New(redisClient)
 
+	// ── Services ──────────────────────────────────────────────────────────────
+	userSvc := service.NewUserService(repos.Users)
+	restaurantSvc := service.NewRestaurantService(repos.Restaurants, cache)
+	menuSvc := service.NewMenuService(repos.Menus, repos.Restaurants, repos.Products, cache)
+	reservationSvc := service.NewReservationService(repos.Reservations, repos.Restaurants, cache)
+	orderSvc := service.NewOrderService(repos.Orders, repos.Products, repos.Restaurants)
+
+	// ── Router ────────────────────────────────────────────────────────────────
 	gin.SetMode(cfg.HTTP.GinMode)
-	r := gin.New()
-	r.Use(gin.Recovery(), gin.Logger())
-
-	r.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{
-			"service": "api",
-			"status":  "ok",
-			"engine":  cfg.Engine,
-		})
+	r := transport.NewRouter(transport.Deps{
+		UserService:        userSvc,
+		RestaurantService:  restaurantSvc,
+		MenuService:        menuSvc,
+		ReservationService: reservationSvc,
+		OrderService:       orderSvc,
+		JWTSecret:          cfg.JWT.Secret,
 	})
 
+	// ── Servidor HTTP con graceful shutdown ───────────────────────────────────
 	addr := fmt.Sprintf(":%d", cfg.HTTP.APIPort)
 	srv := &http.Server{
 		Addr:              addr,
@@ -66,11 +82,10 @@ func buildRepositories(ctx context.Context, cfg *config.Config) (*ports.Reposito
 		if err != nil {
 			return nil, nil, err
 		}
-		repos := repopg.NewRepositories(pool)
-		return repos, pool.Close, nil
+		return repopg.NewRepositories(pool), pool.Close, nil
 
 	case config.EngineMongo:
-		// TODO: instanciar repomongo cuando esté implementado.
+		// La compañera implementa repomongo — cuando esté listo, instanciarlo aquí.
 		return nil, nil, errors.New("motor mongo aún no implementado")
 
 	default:
@@ -78,7 +93,7 @@ func buildRepositories(ctx context.Context, cfg *config.Config) (*ports.Reposito
 	}
 }
 
-// runWithGracefulShutdown levanta el servidor y atiende señales de sistema
+// runWithGracefulShutdown levanta el servidor y atiende señales SIGINT/SIGTERM
 // para hacer shutdown ordenado — evita cortar requests en vuelo.
 func runWithGracefulShutdown(srv *http.Server, name string) {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

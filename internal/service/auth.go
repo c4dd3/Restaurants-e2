@@ -1,37 +1,88 @@
 package service
 
-// AuthService — casos de uso de autenticación.
-//
-// Es el ÚNICO lugar del sistema que maneja contraseñas en claro.
-// Una vez hasheadas y persistidas, nadie más las ve.
-//
-// Dependencias (inyectadas por constructor):
-//   - ports.UserRepository  (sub-DAO elegido por wiring según DB_ENGINE)
-//   - auth.Hasher           (bcrypt wrapper — internal/auth/password.go)
-//   - auth.TokenSigner      (JWT wrapper — internal/auth/jwt.go)
-//
-// Métodos públicos:
-//
-//   Register(ctx, RegisterRequest) (*domain.User, string, error)
-//     1. Validar el DTO (Gin ya valida "required, email, min=6" por tags, pero
-//        acá chequeamos reglas de negocio: email único, role ∈ {client, admin}).
-//     2. Verificar que no exista un usuario con ese email.
-//         - UserRepository.FindByEmail → si devuelve != nil → ErrConflict.
-//     3. Hashear la contraseña: auth.HashPassword(pwd) → string.
-//     4. Construir domain.User con ID (uuid) + email + hash + role + timestamps.
-//     5. UserRepository.Create(ctx, &u).
-//     6. Firmar JWT con (user_id, email, role, exp=24h).
-//     7. Devolver usuario + token.
-//
-//   Login(ctx, LoginRequest) (*domain.User, string, error)
-//     1. UserRepository.FindByEmail(ctx, email) → si no existe → ErrInvalidCredentials.
-//        ⚠ Devolver SIEMPRE el mismo error (no distinguir "email inexistente" de
-//        "password errónea") — evita enumeración de cuentas.
-//     2. auth.VerifyPassword(hash, pwd) → si falla → ErrInvalidCredentials.
-//     3. Firmar JWT y devolver.
-//
-// Notas de seguridad:
-//   - Bcrypt con cost ≥ 12 (ajustable por config; default seguro para 2026).
-//   - JWT con HS256; secret compartido solo con api-service y search-service.
-//   - Expiración del token: 24h por default (configurable).
-//   - No loguear la contraseña ni el hash bajo ningún concepto.
+import (
+	"context"
+	"errors"
+	"time"
+
+	"github.com/google/uuid"
+	"golang.org/x/crypto/bcrypt"
+
+	"restaurants-e2/internal/auth"
+	"restaurants-e2/internal/domain"
+	"restaurants-e2/internal/ports"
+)
+
+// AuthService gestiona registro y login. Es el único lugar del sistema
+// que maneja contraseñas en claro — una vez hasheadas nadie más las ve.
+type AuthService struct {
+	users  ports.UserRepository
+	secret string
+	ttl    time.Duration
+}
+
+// NewAuthService construye el servicio inyectando sus dependencias.
+func NewAuthService(users ports.UserRepository, secret string, ttl time.Duration) *AuthService {
+	return &AuthService{users: users, secret: secret, ttl: ttl}
+}
+
+// Register crea un usuario nuevo y emite su JWT.
+// Retorna domain.ErrConflict si el email ya existe.
+func (s *AuthService) Register(ctx context.Context, req domain.RegisterRequest) (*domain.User, string, error) {
+	// Verificar email único antes de hashear (operación barata primero).
+	existing, err := s.users.FindByEmail(ctx, req.Email)
+	if err != nil && !errors.Is(err, domain.ErrNotFound) {
+		return nil, "", err
+	}
+	if existing != nil {
+		return nil, "", domain.ErrConflict
+	}
+
+	hash, err := auth.HashPassword(req.Password)
+	if err != nil {
+		return nil, "", err
+	}
+
+	u := &domain.User{
+		ID:       uuid.New().String(),
+		Name:     req.Name,
+		Email:    req.Email,
+		Password: hash,
+		Role:     req.Role,
+	}
+
+	if err := s.users.Create(ctx, u); err != nil {
+		return nil, "", err
+	}
+
+	token, err := auth.Sign(u.ID, u.Email, u.Role, s.secret, s.ttl)
+	if err != nil {
+		return nil, "", err
+	}
+
+	return u, token, nil
+}
+
+// Login valida credenciales y emite un JWT.
+// Siempre retorna domain.ErrInvalidCredentials ante cualquier fallo de autenticación
+// (no se distingue "email inexistente" de "password errónea" — evita enumeración).
+func (s *AuthService) Login(ctx context.Context, req domain.LoginRequest) (*domain.User, string, error) {
+	u, err := s.users.FindByEmail(ctx, req.Email)
+	if err != nil {
+		return nil, "", domain.ErrInvalidCredentials
+	}
+
+	if err := auth.VerifyPassword(u.Password, req.Password); err != nil {
+		if errors.Is(err, bcrypt.ErrMismatchedHashAndPassword) {
+			return nil, "", domain.ErrInvalidCredentials
+		}
+		return nil, "", domain.ErrInvalidCredentials
+	}
+
+	token, err := auth.Sign(u.ID, u.Email, u.Role, s.secret, s.ttl)
+	if err != nil {
+		return nil, "", err
+	}
+
+	return u, token, nil
+}

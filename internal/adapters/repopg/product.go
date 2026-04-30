@@ -41,6 +41,22 @@ func (r *ProductRepoPg) FindByID(ctx context.Context, id string) (*domain.Produc
 	return &p, nil
 }
 
+// FindByIDs retorna todos los productos cuyos IDs están en el slice.
+// Usa el operador ANY de Postgres, que acepta arrays nativamente con pgx.
+// Si ids está vacío retorna slice vacío sin hacer round-trip a la BD.
+func (r *ProductRepoPg) FindByIDs(ctx context.Context, ids []string) ([]domain.Product, error) {
+	if len(ids) == 0 {
+		return []domain.Product{}, nil
+	}
+	const q = `
+		SELECT id, menu_id, restaurant_id, name, description, category, price, available
+		FROM products
+		WHERE id = ANY($1)
+		ORDER BY name`
+
+	return collectProducts(ctx, r.pool, q, ids)
+}
+
 // FindByCategory usa el índice idx_products_category definido en init.sql.
 // Retorna slice vacío si no hay productos en esa categoría.
 func (r *ProductRepoPg) FindByCategory(ctx context.Context, category string) ([]domain.Product, error) {
