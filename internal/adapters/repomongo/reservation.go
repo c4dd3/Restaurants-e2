@@ -1,58 +1,107 @@
 package repomongo
 
-// reservation.go — sub-DAO de reservas para MongoDB.
-//
-// Struct:  type ReservationRepoMongo struct { coll *mongo.Collection }
-// Verify:  var _ ports.ReservationRepository = (*ReservationRepoMongo)(nil)
-//
-// Colección: reservations
-// Sharding: SÍ — shard key "restaurant_id" (hashed).
-//   Configurado en deployments/mongo/init-cluster.sh:
-//     sh.shardCollection("restaurants.reservations", { restaurant_id: "hashed" })
-//
-// Por qué esa shard key:
-//   Las consultas "availability de un restaurante X" son frecuentes. Al
-//   shardear por restaurant_id hashed, todas las reservas de un mismo
-//   restaurante viven en el MISMO shard → CheckAvailability golpea 1 shard
-//   (no broadcast). El hash balancea la distribución entre shards.
-//
-// Índice complementario (crear en init):
-//   db.reservations.createIndex({ restaurant_id: 1, date: 1, status: 1 })
-//   → acelera las queries de disponibilidad por ventana de tiempo.
-//
-// Métodos:
-//
-// Create(ctx, r) error
-//   Validar r.RestaurantID != "" (shard key obligatoria).
-//   InsertOne.
-//   ⚠ No hay exclusion constraint como en Postgres — la validación
-//   de solapamiento se hace a nivel service (CheckAvailability antes del insert).
-//   Para mayor garantía bajo concurrencia: usar TX + findOneAndUpdate con
-//   filtro de capacidad disponible (optimistic concurrency).
-//
-// FindByID(ctx, id) (*domain.Reservation, error)
-//   ⚠ Broadcast (no sabemos el restaurant_id). Mitigación: incluirlo en
-//   el filter si el service lo conoce.
-//
-// Cancel(ctx, id) error
-//   UpdateOne({_id: id, status: {$ne: "cancelled"}},
-//             {$set: {status: "cancelled", updated_at: time.Now()}})
-//   Chequear ModifiedCount == 0 → ErrNotFound o ya estaba cancelada.
-//
-// CheckAvailability(ctx, restaurantID, partySize) (int, error)
-//   Lógica:
-//     1. restaurantsColl.FindOne({_id: restaurantID}).Decode(&rest)  // capacity
-//     2. pipeline := [
-//          {$match: {
-//            restaurant_id: restaurantID,
-//            status: "confirmed",
-//            date: {$gte: now, $lt: now+2h}
-//          }},
-//          {$group: {_id: null, total: {$sum: "$party_size"}}}
-//        ]
-//        cur, _ := coll.Aggregate(ctx, pipeline)
-//        // extraer "total" — si cur.TryNext → total=0
-//     3. available := rest.Capacity - total
-//     4. return available
-//
-//   Todo va a UN solo shard gracias a la shard key. Rápido.
+import (
+	"context"
+	"errors"
+	"time"
+
+	"github.com/google/uuid"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
+
+	"restaurants-e2/internal/domain"
+	"restaurants-e2/internal/ports"
+)
+
+type ReservationRepoMongo struct {
+	db   *mongo.Database
+	coll *mongo.Collection
+}
+
+var _ ports.ReservationRepository = (*ReservationRepoMongo)(nil)
+
+func (r *ReservationRepoMongo) Create(ctx context.Context, res *domain.Reservation) error {
+	if res.RestaurantID == "" {
+		return mongo.ErrNilValue
+	}
+	if res.ID == "" {
+		res.ID = uuid.NewString()
+	}
+	if res.Status == "" {
+		res.Status = domain.StatusPending
+	}
+	if res.CreatedAt.IsZero() {
+		res.CreatedAt = time.Now().UTC()
+	}
+	_, err := r.coll.InsertOne(ctx, res)
+	return err
+}
+
+func (r *ReservationRepoMongo) FindByID(ctx context.Context, id string) (*domain.Reservation, error) {
+	var res domain.Reservation
+	err := r.coll.FindOne(ctx, bson.M{"_id": id}).Decode(&res)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (r *ReservationRepoMongo) Cancel(ctx context.Context, id string) error {
+	_, err := r.coll.UpdateOne(
+		ctx,
+		bson.M{"_id": id, "status": bson.M{"$ne": domain.StatusCancelled}},
+		bson.M{"$set": bson.M{"status": domain.StatusCancelled}},
+	)
+	return err
+}
+
+func (r *ReservationRepoMongo) CheckAvailability(ctx context.Context, restaurantID string, partySize int) (int, error) {
+	var rest domain.Restaurant
+	err := r.db.Collection("restaurants").FindOne(ctx, bson.M{"_id": restaurantID}).Decode(&rest)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+
+	now := time.Now().UTC()
+	windowEnd := now.Add(2 * time.Hour)
+	pipeline := mongo.Pipeline{
+		bson.D{{Key: "$match", Value: bson.M{
+			"restaurant_id": restaurantID,
+			"status":        domain.StatusConfirmed,
+			"date":          bson.M{"$gte": now, "$lt": windowEnd},
+		}}},
+		bson.D{{Key: "$group", Value: bson.M{
+			"_id":   nil,
+			"total": bson.M{"$sum": "$party_size"},
+		}}},
+	}
+
+	cur, err := r.coll.Aggregate(ctx, pipeline, options.Aggregate())
+	if err != nil {
+		return 0, err
+	}
+	defer cur.Close(ctx)
+
+	total := 0
+	if cur.Next(ctx) {
+		var agg struct {
+			Total int `bson:"total"`
+		}
+		if err := cur.Decode(&agg); err != nil {
+			return 0, err
+		}
+		total = agg.Total
+	}
+	if err := cur.Err(); err != nil {
+		return 0, err
+	}
+
+	return rest.Capacity - total, nil
+}
