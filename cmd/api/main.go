@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"restaurants-e2/internal/adapters/cacheredis"
+	"restaurants-e2/internal/adapters/repomongo"
 	"restaurants-e2/internal/adapters/repopg"
 	"restaurants-e2/internal/config"
 	"restaurants-e2/internal/ports"
@@ -87,8 +88,18 @@ func buildRepositories(ctx context.Context, cfg *config.Config) (*ports.Reposito
 		return repopg.NewRepositories(pool), pool.Close, nil
 
 	case config.EngineMongo:
-		// La compañera implementa repomongo — cuando esté listo, instanciarlo aquí.
-		return nil, nil, errors.New("motor mongo aún no implementado")
+		client, err := repomongo.NewClient(ctx, cfg.Mongo)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		repos := repomongo.NewRepositories(client, cfg.Mongo.DBName)
+
+		cleanup := func() {
+			_ = client.Disconnect(context.Background())
+		}
+
+		return repos, cleanup, nil
 
 	default:
 		return nil, nil, fmt.Errorf("motor desconocido: %s", cfg.Engine)
