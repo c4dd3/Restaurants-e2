@@ -48,7 +48,7 @@ func (s *AuthService) Register(ctx context.Context, req domain.RegisterRequest) 
 		Name:     req.Name,
 		Email:    req.Email,
 		Password: hash,
-		Role:     req.Role,
+		Role:     domain.RoleClient, // Registro público siempre es "client"; admins se crean por seed.
 	}
 
 	if err := s.users.Create(ctx, u); err != nil {

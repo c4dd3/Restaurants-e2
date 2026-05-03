@@ -1,73 +1,61 @@
-//go:build ignore
-
 package main
 
-// prompts.go — templates de prompts para el LLM.
-//
-// Cada función devuelve (systemPrompt, userPrompt string). Se mantienen como
-// funciones (no constantes) para que se puedan parametrizar (ej: cantidad N).
-//
-// ───────────────────────────────────────────────────────────────────────────
-// 1. Restaurantes
-// ───────────────────────────────────────────────────────────────────────────
-//
-//   promptRestaurants(n int) (system, user string)
-//
-//   system = "Eres un generador de datos sintéticos para una app de
-//            restaurantes en Costa Rica. Devuelves SIEMPRE JSON válido,
-//            sin markdown. Los nombres y direcciones deben ser realistas
-//            pero ficticios."
-//
-//   user = fmt.Sprintf(`Genera %d restaurantes con la siguiente forma:
-//     {
-//       "restaurants": [
-//         {
-//           "name": string (2-4 palabras, creativo pero plausible),
-//           "description": string (1-2 oraciones),
-//           "address": string (calle + provincia de Costa Rica),
-//           "category": one of ["mexicana","italiana","tica","japonesa","mariscos","vegetariana","parrilla","postres","cafetería"]
-//         }
-//       ]
-//     }
-//     IMPORTANTE: nombres NO repetidos. Variedad de provincias.`, n)
-//
-// ───────────────────────────────────────────────────────────────────────────
-// 2. Menús y productos (combinado en un solo prompt para coherencia)
-// ───────────────────────────────────────────────────────────────────────────
-//
-//   promptMenuWithProducts(restaurantName, restaurantCategory string, numProducts int)
-//
-//   user = fmt.Sprintf(`El restaurante "%s" es de categoría "%s".
-//     Genera UN menú con %d productos coherentes con esa categoría.
-//     Forma:
-//     {
-//       "menu": {
-//         "name": string (ej: "Menú principal", "Especiales del chef"),
-//         "products": [
-//           { "name": str, "description": str, "price": number (en CRC, 2000-15000),
-//             "category": str (entrada|plato fuerte|bebida|postre) }
-//         ]
-//       }
-//     }`, restaurantName, restaurantCategory, numProducts)
-//
-// ───────────────────────────────────────────────────────────────────────────
-// 3. Usuarios
-// ───────────────────────────────────────────────────────────────────────────
-//
-//   promptUsers(n int)
-//
-//   user = `Genera N usuarios con:
-//     {"users":[{"name": str (nombre + apellido tico/latino), "email": str (formato realista, no repetido)}]}
-//     Contraseñas NO se generan — se asignarán todas como "password123" en el script.`
-//
-// ───────────────────────────────────────────────────────────────────────────
-// 4. (Opcional) Reviews / comentarios — fuera de Etapa 2.
-// ───────────────────────────────────────────────────────────────────────────
-//
-// Tips:
-//   - Usar temperature ~0.8 para creatividad en nombres; 0.3 si se quiere
-//     reproducibilidad.
-//   - Incluir few-shot examples en el system prompt mejora notablemente
-//     la coherencia de los precios y direcciones.
-//   - Para evitar homogeneidad, incluir seed/nonce en cada prompt
-//     (ej: "batch-id: 7") — el LLM varía más con eso.
+import "fmt"
+
+const systemPrompt = `Eres un generador de datos sintéticos para una app de restaurantes en Costa Rica.
+Devuelves SIEMPRE JSON válido, sin markdown ni bloques de código.
+Los nombres y direcciones deben ser realistas pero ficticios.`
+
+func promptRestaurants(n, batchID int) (system, user string) {
+	return systemPrompt, fmt.Sprintf(`Genera %d restaurantes costarricenses. batch-id: %d
+Devuelve SOLO este JSON (sin texto extra):
+{
+  "restaurants": [
+    {
+      "name": "string (2-4 palabras, creativo)",
+      "description": "string (1-2 oraciones sobre el restaurante)",
+      "address": "string (dirección realista con provincia de Costa Rica)",
+      "phone": "string (formato +506 XXXX-XXXX)",
+      "category": "string (una de: tica|italiana|mexicana|japonesa|mariscos|vegetariana|parrilla|postres|cafetería)",
+      "capacity": "number (entre 20 y 120)"
+    }
+  ]
+}
+IMPORTANTE: nombres únicos, variedad de provincias (San José, Heredia, Alajuela, Cartago, Guanacaste, Limón, Puntarenas).`, n, batchID)
+}
+
+func promptMenuWithProducts(restaurantName, category string, numProducts int) (system, user string) {
+	return systemPrompt, fmt.Sprintf(`El restaurante "%s" es de categoría "%s".
+Genera UN menú con exactamente %d productos coherentes con esa categoría.
+Devuelve SOLO este JSON (sin texto extra):
+{
+  "menu": {
+    "name": "string (ej: Menú Principal, Especialidades del Chef, Carta de Temporada)",
+    "description": "string (1 oración describiendo el menú)",
+    "products": [
+      {
+        "name": "string (nombre del plato)",
+        "description": "string (descripción apetitosa de 1 oración)",
+        "category": "string (una de: entrada|plato fuerte|bebida|postre|snack)",
+        "price": "number (en colones CRC, entre 2500 y 18000)",
+        "available": true
+      }
+    ]
+  }
+}
+IMPORTANTE: precios realistas para Costa Rica, nombres creativos y variados.`, restaurantName, category, numProducts)
+}
+
+func promptUsers(n, batchID int) (system, user string) {
+	return systemPrompt, fmt.Sprintf(`Genera %d usuarios costarricenses. batch-id: %d
+Devuelve SOLO este JSON (sin texto extra):
+{
+  "users": [
+    {
+      "name": "string (nombre y apellido latino, realista)",
+      "email": "string (email realista y único, lowercase)"
+    }
+  ]
+}
+IMPORTANTE: emails únicos, nombres variados con apellidos costarricenses.`, n, batchID)
+}
