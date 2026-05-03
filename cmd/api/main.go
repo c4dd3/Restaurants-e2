@@ -48,6 +48,7 @@ func main() {
 	userSvc := service.NewUserService(repos.Users)
 	restaurantSvc := service.NewRestaurantService(repos.Restaurants, cache)
 	menuSvc := service.NewMenuService(repos.Menus, repos.Restaurants, repos.Products, cache)
+	productSvc := service.NewProductService(repos.Products, cache)
 	reservationSvc := service.NewReservationService(repos.Reservations, repos.Restaurants, cache)
 	orderSvc := service.NewOrderService(repos.Orders, repos.Products, repos.Restaurants)
 
@@ -57,6 +58,7 @@ func main() {
 		UserService:        userSvc,
 		RestaurantService:  restaurantSvc,
 		MenuService:        menuSvc,
+		ProductService:     productSvc,
 		ReservationService: reservationSvc,
 		OrderService:       orderSvc,
 		JWTSecret:          cfg.JWT.Secret,

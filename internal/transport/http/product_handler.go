@@ -1,48 +1,132 @@
 package http
 
-// product_handler.go — handlers de /products.
-//
-// Struct:
-//
-//   type ProductHandler struct {
-//       svc *service.ProductService
-//   }
-//
-// Rutas:
-//
-//   GET /products/:id
-//   ──────────────────────
-//   1. id := c.Param("id")
-//   2. p, err := h.svc.GetByID(ctx, id)    ← service intenta cache primero.
-//   3. err → http; 200.
-//
-//   GET /menus/:id/products
-//   ──────────────────────
-//   (Productos de un menú específico — útil para rendering en frontend.)
-//   1. menuID := c.Param("id")
-//   2. list, err := h.svc.ListByMenu(ctx, menuID)
-//   3. err → http; 200.
-//
-//   POST /products   (admin)
-//   ──────────────────────
-//   1. var req struct {
-//          MenuID string `json:"menu_id" binding:"required,uuid"`
-//          Product domain.ProductRequest `json:"product" binding:"required"`
-//      }
-//      bind.
-//   2. p, err := h.svc.Create(ctx, req.MenuID, req.Product, role)
-//   3. err → http; 201.
-//   4. El service indexa el producto en ES (side-effect asíncrono posible).
-//
-//   PATCH /products/:id  (admin)
-//   ──────────────────────
-//   UpdateProductRequest. Service invalida cache + reindex ES.
-//
-//   DELETE /products/:id (admin)
-//   ──────────────────────
-//   Service elimina de BD + borra de ES. 204.
-//
-// Notas:
-//   - Los endpoints de búsqueda (/search/products) viven en search_handler.go,
-//     separados porque los sirve el search-service, no el api-service.
-//   - GET /products/:id usa cache-aside (TTL corto 30-60s). Handler agnóstico.
+import (
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+
+	"restaurants-e2/internal/domain"
+	"restaurants-e2/internal/service"
+)
+
+// ProductHandler maneja las operaciones individuales sobre productos.
+// La creación de productos se hace vía MenuHandler (POST /menus) porque los
+// productos siempre pertenecen a un menú.
+type ProductHandler struct {
+	svc *service.ProductService
+}
+
+func NewProductHandler(svc *service.ProductService) *ProductHandler {
+	return &ProductHandler{svc: svc}
+}
+
+// GetByID godoc
+// GET /products/:id
+// Requiere: JWT
+// Response 200: domain.Product
+func (h *ProductHandler) GetByID(c *gin.Context) {
+	id := c.Param("id")
+
+	p, err := h.svc.GetByID(c.Request.Context(), id)
+	if err != nil {
+		renderError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, p)
+}
+
+// ListByCategory godoc
+// GET /products?category=:categoria
+// Si no se pasa ?category devuelve todos los productos.
+// Requiere: JWT
+// Response 200: []domain.Product
+func (h *ProductHandler) ListByCategory(c *gin.Context) {
+	category := c.Query("category")
+	if category == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "bad_request", "detail": "query param 'category' es requerido"})
+		return
+	}
+
+	list, err := h.svc.ListByCategory(c.Request.Context(), category)
+	if err != nil {
+		renderError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, list)
+}
+
+// Update godoc
+// PATCH /products/:id
+// Requiere: JWT + role=admin
+// Body: campos opcionales a modificar (name, description, category, price, available)
+// Response 200: domain.Product actualizado
+func (h *ProductHandler) Update(c *gin.Context) {
+	role := c.GetString("role")
+	id := c.Param("id")
+
+	// Primero cargamos el producto existente para hacer patch parcial
+	existing, err := h.svc.GetByID(c.Request.Context(), id)
+	if err != nil {
+		renderError(c, err)
+		return
+	}
+
+	var req struct {
+		Name        *string  `json:"name"`
+		Description *string  `json:"description"`
+		Category    *string  `json:"category"`
+		Price       *float64 `json:"price"`
+		Available   *bool    `json:"available"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "bad_request", "detail": err.Error()})
+		return
+	}
+
+	// Aplicar solo los campos presentes en el body (patch semántico)
+	updated := *existing
+	if req.Name != nil {
+		updated.Name = *req.Name
+	}
+	if req.Description != nil {
+		updated.Description = *req.Description
+	}
+	if req.Category != nil {
+		updated.Category = *req.Category
+	}
+	if req.Price != nil {
+		updated.Price = *req.Price
+	}
+	if req.Available != nil {
+		updated.Available = *req.Available
+	}
+
+	result, err := h.svc.Update(c.Request.Context(), role, &updated)
+	if err != nil {
+		renderError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+// Delete godoc
+// DELETE /products/:id
+// Requiere: JWT + role=admin
+// Response 204: No Content
+func (h *ProductHandler) Delete(c *gin.Context) {
+	role := c.GetString("role")
+	id := c.Param("id")
+
+	if err := h.svc.Delete(c.Request.Context(), role, id); err != nil {
+		renderError(c, err)
+		return
+	}
+
+	c.Status(http.StatusNoContent)
+}
+
+// Ensure ProductHandler satisfies the domain contract at compile time.
+var _ = domain.Product{}

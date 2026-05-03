@@ -34,6 +34,23 @@ func (r *ProductRepoMongo) FindByID(ctx context.Context, id string) (*domain.Pro
 	return &product, nil
 }
 
+func (r *ProductRepoMongo) FindByIDs(ctx context.Context, ids []string) ([]domain.Product, error) {
+	if len(ids) == 0 {
+		return []domain.Product{}, nil
+	}
+	cur, err := r.coll.Find(ctx, bson.M{"_id": bson.M{"$in": ids}})
+	if err != nil {
+		return nil, err
+	}
+	defer cur.Close(ctx)
+
+	var products []domain.Product
+	if err := cur.All(ctx, &products); err != nil {
+		return nil, err
+	}
+	return products, nil
+}
+
 func (r *ProductRepoMongo) FindByCategory(ctx context.Context, category string) ([]domain.Product, error) {
 	cur, err := r.coll.Find(ctx, bson.M{"category": category})
 	if err != nil {
