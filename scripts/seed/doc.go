@@ -1,3 +1,5 @@
+//go:build ignore
+
 // Package main (scripts/seed) — generador de datos de prueba asistido por LLM.
 //
 // Propósito: cumplir el requisito del enunciado "uso de LLMs para generar

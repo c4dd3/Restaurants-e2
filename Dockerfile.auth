@@ -2,7 +2,7 @@
 # Dockerfile multi-stage para el servicio `auth` — idéntico al de api
 # salvo el binario y el puerto. Se mantiene separado para poder versionarlos independientemente.
 
-FROM golang:1.22-alpine AS builder
+FROM golang:1.23-alpine AS builder
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download

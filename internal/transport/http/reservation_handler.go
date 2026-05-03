@@ -1,54 +1,62 @@
 package http
 
-// reservation_handler.go — handlers de /reservations.
-//
-// Struct:
-//
-//   type ReservationHandler struct {
-//       svc *service.ReservationService
-//   }
-//
-// Rutas:
-//
-//   POST /reservations
-//   ──────────────────────
-//   1. var req domain.CreateReservationRequest; bind.
-//      (restaurant_id, date, people_count)
-//   2. uid := c.GetString("user_id")
-//   3. r, err := h.svc.Create(ctx, uid, req)
-//   4. err → http:
-//        - ErrConflict (409) → "slot_not_available" (colisión de horario).
-//        - ErrValidation (422) → fecha pasada, people_count inválido, etc.
-//   5. 201 con reservation.
-//
-//   GET /reservations  (listar las propias)
-//   ──────────────────────
-//   1. uid := c.GetString("user_id")
-//   2. list, err := h.svc.ListByUser(ctx, uid)
-//   3. err → http; 200.
-//
-//   GET /reservations/:id
-//   ──────────────────────
-//   1. id := c.Param("id")
-//   2. uid := c.GetString("user_id"); role := c.GetString("role")
-//   3. r, err := h.svc.GetByID(ctx, id, uid, role)
-//      ← el service verifica ownership (o admin). Si no corresponde → 403.
-//   4. err → http; 200.
-//
-//   DELETE /reservations/:id  (cancelar)
-//   ──────────────────────
-//   1. Similar ownership check.
-//   2. Service actualiza status a "cancelled" (no delete físico, para auditoría).
-//   3. 204.
-//
-// Notas sobre disponibilidad:
-//   - El service hace CheckAvailability ANTES de INSERT. Aún así, dos
-//     requests simultáneos podrían ambos pasar el check. La mitigación
-//     depende del motor:
-//       - Postgres: constraint EXCLUDE USING gist (descrito en repopg/reservation.go).
-//       - Mongo: unique index parcial + retry tras duplicate key error.
-//   - El handler NO se preocupa de concurrencia; solo refleja el resultado.
-//
-// Por qué GET /reservations solo devuelve las del usuario:
-//   - Privacidad por defecto. Un admin que quiera todas usa un endpoint
-//     separado (/admin/reservations) o query param explicit.
+import (
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+
+	"restaurants-e2/internal/domain"
+	"restaurants-e2/internal/service"
+)
+
+// ReservationHandler maneja operaciones sobre reservas de mesa.
+type ReservationHandler struct {
+	svc *service.ReservationService
+}
+
+func NewReservationHandler(svc *service.ReservationService) *ReservationHandler {
+	return &ReservationHandler{svc: svc}
+}
+
+// Create godoc
+// POST /reservations
+// Requiere: JWT
+// Body: { restaurant_id, date, party_size, notes? }
+// Response 201: domain.Reservation
+// Errores:
+//   - 422 si el restaurante no existe o los datos son inválidos
+//   - 409 si no hay disponibilidad en esa ventana de tiempo
+func (h *ReservationHandler) Create(c *gin.Context) {
+	userID := c.GetString("user_id")
+
+	var req domain.CreateReservationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "bad_request", "detail": err.Error()})
+		return
+	}
+
+	reservation, err := h.svc.Create(c.Request.Context(), userID, req)
+	if err != nil {
+		renderError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusCreated, reservation)
+}
+
+// Cancel godoc
+// DELETE /reservations/:id
+// Requiere: JWT
+// Solo el dueño de la reserva puede cancelarla (el service lo verifica).
+// Response 204: No Content
+func (h *ReservationHandler) Cancel(c *gin.Context) {
+	userID := c.GetString("user_id")
+	id := c.Param("id")
+
+	if err := h.svc.Cancel(c.Request.Context(), userID, id); err != nil {
+		renderError(c, err)
+		return
+	}
+
+	c.Status(http.StatusNoContent)
+}

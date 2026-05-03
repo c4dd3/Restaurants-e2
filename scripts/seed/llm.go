@@ -1,3 +1,5 @@
+//go:build ignore
+
 package main
 
 // llm.go — cliente HTTP genérico para el proveedor LLM (OpenAI o Anthropic).

@@ -43,6 +43,10 @@ type MenuRepository interface {
 // En MongoDB esta colección se shardea por `category` (hashed).
 type ProductRepository interface {
 	FindByID(ctx context.Context, id string) (*domain.Product, error)
+	// FindByIDs retorna los productos cuyos IDs están en la lista.
+	// Usado por OrderService para validar y obtener precios en una sola query.
+	// En Postgres: WHERE id = ANY($1). En Mongo: $in.
+	FindByIDs(ctx context.Context, ids []string) ([]domain.Product, error)
 	FindByCategory(ctx context.Context, category string) ([]domain.Product, error)
 	FindAll(ctx context.Context) ([]domain.Product, error)
 	Create(ctx context.Context, p *domain.Product) error

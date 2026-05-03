@@ -1,48 +1,100 @@
 package http
 
-// menu_handler.go — handlers de /menus.
-//
-// Struct:
-//
-//   type MenuHandler struct {
-//       svc *service.MenuService
-//   }
-//
-// Rutas:
-//
-//   POST /menus   (admin)
-//   ──────────────────────
-//   1. var req domain.CreateMenuRequest; bind.
-//      (Incluye restaurant_id, name, products[] con ProductRequest embebido.)
-//   2. role := c.GetString("role")
-//   3. m, err := h.svc.Create(ctx, req, role)
-//   4. err → http; 201 con menu (incluyendo IDs de productos creados).
-//
-//   GET /menus/:id
-//   ──────────────────────
-//   1. id := c.Param("id")
-//   2. m, err := h.svc.GetByID(ctx, id)
-//      ← el service puede incluir los productos (JOIN en pg, $lookup en mongo).
-//   3. err → http; 200.
-//
-//   GET /restaurants/:id/menus
-//   ──────────────────────
-//   (Endpoint opcional, útil para listar todos los menús de un restaurante.)
-//   1. restaurantID := c.Param("id")
-//   2. list, err := h.svc.ListByRestaurant(ctx, restaurantID)
-//   3. err → http; 200.
-//
-//   PATCH /menus/:id   (admin)
-//   ──────────────────────
-//   UpdateMenuRequest. Validar role. Service ejecuta.
-//
-//   DELETE /menus/:id  (admin)
-//   ──────────────────────
-//   Cascadea a productos si el modelado lo exige. 204 si ok.
-//
-// Notas:
-//   - El bind en POST /menus hace validación profunda (cada ProductRequest
-//     tiene sus tags binding:"required,min,max"). Si un producto del array
-//     es inválido → 400 antes de tocar el service.
-//   - El service ejecuta esto en TX: el menú y sus productos son atómicos.
-//     Si cualquier producto falla, no se crea nada.
+import (
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+
+	"restaurants-e2/internal/domain"
+	"restaurants-e2/internal/service"
+)
+
+// MenuHandler maneja operaciones sobre menús y sus productos.
+type MenuHandler struct {
+	svc *service.MenuService
+}
+
+func NewMenuHandler(svc *service.MenuService) *MenuHandler {
+	return &MenuHandler{svc: svc}
+}
+
+// Create godoc
+// POST /menus
+// Requiere: JWT + role=admin
+// Body: { restaurant_id, name, description?, products[] }
+// Response 201: domain.Menu con productos creados
+func (h *MenuHandler) Create(c *gin.Context) {
+	role := c.GetString("role")
+
+	var req domain.CreateMenuRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "bad_request", "detail": err.Error()})
+		return
+	}
+
+	menu, err := h.svc.Create(c.Request.Context(), role, req)
+	if err != nil {
+		renderError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusCreated, menu)
+}
+
+// GetByID godoc
+// GET /menus/:id
+// Requiere: JWT
+// Response 200: domain.Menu con sus productos
+func (h *MenuHandler) GetByID(c *gin.Context) {
+	id := c.Param("id")
+
+	menu, err := h.svc.GetByID(c.Request.Context(), id)
+	if err != nil {
+		renderError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, menu)
+}
+
+// Update godoc
+// PUT /menus/:id
+// Requiere: JWT + role=admin
+// Body: { name?, description?, products[]? }
+// Si products viene en el body, reemplaza TODOS los productos del menú (TX atómica).
+// Response 200: domain.Menu actualizado
+func (h *MenuHandler) Update(c *gin.Context) {
+	role := c.GetString("role")
+	id := c.Param("id")
+
+	var req domain.UpdateMenuRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "bad_request", "detail": err.Error()})
+		return
+	}
+
+	menu, err := h.svc.Update(c.Request.Context(), role, id, req)
+	if err != nil {
+		renderError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, menu)
+}
+
+// Delete godoc
+// DELETE /menus/:id
+// Requiere: JWT + role=admin
+// Los productos del menú se eliminan en cascada (ON DELETE CASCADE en Postgres).
+// Response 204: No Content
+func (h *MenuHandler) Delete(c *gin.Context) {
+	role := c.GetString("role")
+	id := c.Param("id")
+
+	if err := h.svc.Delete(c.Request.Context(), role, id); err != nil {
+		renderError(c, err)
+		return
+	}
+
+	c.Status(http.StatusNoContent)
+}

@@ -1,40 +1,87 @@
 package service
 
-// ProductService — casos de uso sobre productos individuales.
-//
-// Los productos se crean típicamente vía MenuService.Create (como parte de un menú),
-// pero también se pueden manipular individualmente.
-//
-// Dependencias:
-//   - ports.ProductRepository
-//   - ports.Cache
-//
-// Métodos públicos:
-//
-//   GetByID(ctx, id string) (*domain.Product, error)
-//     1. Cache.Get(ctx, "products:id:"+id, &p).
-//     2. Si miss → ProductRepository.FindByID(ctx, id) → ErrNotFound si no existe.
-//     3. Cache.Set(ctx, "products:id:"+id, p, 10*time.Minute).
-//
-//   ListByCategory(ctx, category string) ([]domain.Product, error)
-//     1. Cache.Get(ctx, "products:cat:"+category, &list).
-//     2. Si miss → ProductRepository.FindByCategory(ctx, category).
-//     3. Cache.Set.
-//
-//   Update(ctx, userRole string, p *domain.Product) (*domain.Product, error)
-//     1. Permisos: solo admin.
-//     2. ProductRepository.Update(ctx, p).
-//     3. Invalidar: Cache.Del("products:id:"+p.ID), Cache.DelByPattern("products:cat:*")
-//        (no sabemos si cambió de categoría — mejor borrar todos los listados).
-//
-//   Delete(ctx, userRole, id string) error
-//     1. Permisos: solo admin.
-//     2. ProductRepository.Delete(ctx, id).
-//     3. Invalidación igual que Update.
-//
-// ⚠ Consistencia con el índice de búsqueda:
-//   ElasticSearch se REindexa periódicamente (POST /search/reindex).
-//   No encadenamos el delete a ES desde acá para mantener los servicios
-//   desacoplados. La alternativa evolutiva es un outbox pattern o un
-//   evento (Kafka/NATS) al que el search-service se suscribe — fuera
-//   del alcance de Etapa 2.
+import (
+	"context"
+	"time"
+
+	"restaurants-e2/internal/domain"
+	"restaurants-e2/internal/ports"
+)
+
+// ProductService gestiona productos individuales con cache-aside.
+// Los productos se crean normalmente vía MenuService, pero este service
+// permite consultarlos y modificarlos de forma independiente.
+type ProductService struct {
+	products ports.ProductRepository
+	cache    ports.Cache
+}
+
+// NewProductService construye el servicio inyectando sus dependencias.
+func NewProductService(products ports.ProductRepository, cache ports.Cache) *ProductService {
+	return &ProductService{products: products, cache: cache}
+}
+
+// GetByID devuelve un producto por ID con cache-aside (TTL 10 min).
+func (s *ProductService) GetByID(ctx context.Context, id string) (*domain.Product, error) {
+	var p domain.Product
+	if err := s.cache.Get(ctx, "products:id:"+id, &p); err == nil {
+		return &p, nil
+	}
+
+	result, err := s.products.FindByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	_ = s.cache.Set(ctx, "products:id:"+id, result, 10*time.Minute)
+	return result, nil
+}
+
+// ListByCategory devuelve los productos de una categoría con cache-aside (TTL 10 min).
+// En MongoDB esta query es targeted (hit directo al shard de esa categoría).
+func (s *ProductService) ListByCategory(ctx context.Context, category string) ([]domain.Product, error) {
+	var list []domain.Product
+	if err := s.cache.Get(ctx, "products:cat:"+category, &list); err == nil {
+		return list, nil
+	}
+
+	result, err := s.products.FindByCategory(ctx, category)
+	if err != nil {
+		return nil, err
+	}
+
+	_ = s.cache.Set(ctx, "products:cat:"+category, result, 10*time.Minute)
+	return result, nil
+}
+
+// Update modifica un producto. Solo admins.
+// Invalida tanto la entrada individual como todos los listados por categoría
+// (no sabemos si cambió de categoría, así que es más seguro limpiar todo).
+func (s *ProductService) Update(ctx context.Context, userRole string, p *domain.Product) (*domain.Product, error) {
+	if userRole != domain.RoleAdmin {
+		return nil, domain.ErrForbidden
+	}
+
+	if err := s.products.Update(ctx, p); err != nil {
+		return nil, err
+	}
+
+	_ = s.cache.Del(ctx, "products:id:"+p.ID)
+	_ = s.cache.DelByPattern(ctx, "products:cat:*")
+	return p, nil
+}
+
+// Delete elimina un producto. Solo admins.
+func (s *ProductService) Delete(ctx context.Context, userRole, id string) error {
+	if userRole != domain.RoleAdmin {
+		return domain.ErrForbidden
+	}
+
+	if err := s.products.Delete(ctx, id); err != nil {
+		return err
+	}
+
+	_ = s.cache.Del(ctx, "products:id:"+id)
+	_ = s.cache.DelByPattern(ctx, "products:cat:*")
+	return nil
+}

@@ -1,24 +1,13 @@
 package service
 
-// Este archivo centraliza los ERRORES DE DOMINIO que los services exponen.
+// Los errores que los servicios retornan están definidos en internal/domain/errors.go
+// porque los adapters también los necesitan. Este archivo solo documenta el mapeo a HTTP:
 //
-// Filosofía:
-//   - Los adapters devuelven errores crudos (pgx.ErrNoRows, mongo.ErrNoDocuments, ...).
-//   - El service los normaliza a uno de estos errores de dominio.
-//   - La capa transport/http traduce cada uno a un HTTP status code (ver transport/http/errors.go).
+//   domain.ErrNotFound           → 404 Not Found
+//   domain.ErrConflict           → 409 Conflict
+//   domain.ErrInvalidCredentials → 401 Unauthorized
+//   domain.ErrUnauthorized       → 401 Unauthorized
+//   domain.ErrForbidden          → 403 Forbidden
+//   domain.ErrValidation         → 422 Unprocessable Entity
 //
-// De esta forma:
-//   - El service no sabe nada de HTTP.
-//   - El handler no sabe nada de pgx/mongo.
-//
-// Lista mínima a implementar:
-//
-//   ErrNotFound            → 404  (recurso inexistente)
-//   ErrInvalidCredentials  → 401  (login fallido)
-//   ErrUnauthorized        → 401  (token inválido/vencido)
-//   ErrForbidden           → 403  (autenticado pero sin permisos — ej. no-admin)
-//   ErrConflict            → 409  (violación de unicidad, reserva solapada, etc.)
-//   ErrValidation          → 422  (DTO válido pero viola reglas de negocio)
-//
-// Usar `errors.New("...")` para cada uno. Opcionalmente envolver con fmt.Errorf
-// para agregar contexto sin perder la identidad (errors.Is funciona con la base).
+// La traducción real vive en internal/transport/http/errors.go.

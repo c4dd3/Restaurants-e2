@@ -1,3 +1,5 @@
+//go:build ignore
+
 package main
 
 // main.go — entrada del seed generator.
