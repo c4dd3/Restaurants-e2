@@ -2,6 +2,7 @@ package repomongo
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -76,11 +77,8 @@ func TestMenuRepoMongoCRUD(t *testing.T) {
 	// Si Delete sí pasó, confirmo que ya no exista.
 	if err == nil {
 		missing, findErr := repos.Menus.FindByID(ctx, "menu-1")
-		if findErr != nil {
-			t.Fatal(findErr)
-		}
-		if missing != nil {
-			t.Fatalf("se esperaba menú eliminado, obtuvo %#v", missing)
+		if !errors.Is(findErr, domain.ErrNotFound) {
+			t.Fatalf("esperaba ErrNotFound, obtuvo menu=%#v err=%v", missing, findErr)
 		}
 	}
 }
@@ -159,19 +157,13 @@ func TestMenuRepoMongoUpdateProductsAndMissing(t *testing.T) {
 	}
 
 	missing, err := repos.Menus.FindByID(ctx, "no-existe")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if missing != nil {
-		t.Fatalf("esperaba nil para menú inexistente, obtuvo %#v", missing)
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("esperaba ErrNotFound, obtuvo menu=%#v err=%v", missing, err)
 	}
 
 	updated, err = repos.Menus.Update(ctx, "no-existe", &domain.UpdateMenuRequest{Name: "Nada"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if updated != nil {
-		t.Fatalf("esperaba nil al actualizar menú inexistente, obtuvo %#v", updated)
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("esperaba ErrNotFound al actualizar menú inexistente, obtuvo menu=%#v err=%v", updated, err)
 	}
 
 	err = repos.Menus.Delete(ctx, "menu-extra")

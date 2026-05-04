@@ -2,6 +2,7 @@ package repomongo
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"restaurants-e2/internal/domain"
@@ -50,10 +51,7 @@ func TestRestaurantRepoMongoDefaultsAndMissing(t *testing.T) {
 	}
 
 	missing, err := repos.Restaurants.FindByID(ctx, "no-existe")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if missing != nil {
-		t.Fatalf("esperaba nil para restaurante inexistente, obtuvo %#v", missing)
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("esperaba ErrNotFound, obtuvo restaurant=%#v err=%v", missing, err)
 	}
 }
