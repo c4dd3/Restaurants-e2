@@ -34,3 +34,26 @@ func TestRestaurantRepoMongoCreateFindAndList(t *testing.T) {
 		t.Fatalf("se esperaba 1 restaurante, obtuvo %d", len(all))
 	}
 }
+
+// Revisa campos automáticos y el caso donde no se encuentra el restaurante.
+func TestRestaurantRepoMongoDefaultsAndMissing(t *testing.T) {
+	repos, cleanup := testMongoRepositories(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	r := &domain.Restaurant{Name: "Rest sin ID", Address: "Cartago", Phone: "2222-2222", AdminID: "admin-1", Capacity: 12}
+	if err := repos.Restaurants.Create(ctx, r); err != nil {
+		t.Fatal(err)
+	}
+	if r.ID == "" || r.CreatedAt.IsZero() || r.UpdatedAt.IsZero() {
+		t.Fatalf("no llenó campos automáticos: %#v", r)
+	}
+
+	missing, err := repos.Restaurants.FindByID(ctx, "no-existe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if missing != nil {
+		t.Fatalf("esperaba nil para restaurante inexistente, obtuvo %#v", missing)
+	}
+}

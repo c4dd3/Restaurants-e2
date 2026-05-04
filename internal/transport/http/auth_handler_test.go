@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"restaurants-e2/internal/auth"
 	"restaurants-e2/internal/domain"
 	"restaurants-e2/internal/service"
 )
@@ -271,4 +273,270 @@ func TestAuthHandlerRegisterAndLogin(t *testing.T) {
 	if !strings.Contains(w.Body.String(), "bea@example.com") {
 		t.Fatalf("respuesta no contiene usuario esperado: %s", w.Body.String())
 	}
+}
+
+// Reviso el traductor de errores HTTP, incluyendo los errores envueltos con %w.
+func TestRenderErrorStatuses(t *testing.T) {
+	setupGin()
+
+	cases := []struct {
+		name   string
+		err    error
+		status int
+		body   string
+	}{
+		{"not found", domain.ErrNotFound, http.StatusNotFound, "not_found"},
+		{"invalid credentials", domain.ErrInvalidCredentials, http.StatusUnauthorized, "invalid_credentials"},
+		{"unauthorized", domain.ErrUnauthorized, http.StatusUnauthorized, "unauthorized"},
+		{"forbidden", domain.ErrForbidden, http.StatusForbidden, "forbidden"},
+		{"conflict", fmt.Errorf("correo repetido: %w", domain.ErrConflict), http.StatusConflict, "conflict"},
+		{"validation", fmt.Errorf("nombre vacío: %w", domain.ErrValidation), http.StatusUnprocessableEntity, "validation_error"},
+		{"internal", errors.New("db apagada"), http.StatusInternalServerError, "internal_server_error"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := gin.New()
+			r.GET("/err", func(c *gin.Context) { renderError(c, tc.err) })
+
+			w := performJSON(r, http.MethodGet, "/err", nil)
+			requireStatus(t, w, tc.status)
+			if !strings.Contains(w.Body.String(), tc.body) {
+				t.Fatalf("respuesta inesperada: %s", w.Body.String())
+			}
+		})
+	}
+}
+
+// RequestID es pequeño, pero es parte del router real y conviene cubrirlo.
+func TestRequestIDMiddleware(t *testing.T) {
+	setupGin()
+	r := gin.New()
+	r.Use(RequestID())
+	r.GET("/ping", func(c *gin.Context) {
+		if c.GetString("request_id") == "" {
+			t.Fatal("no guardó request_id en el contexto")
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	w := performJSON(r, http.MethodGet, "/ping", nil)
+	requireStatus(t, w, http.StatusOK)
+	if w.Header().Get("X-Request-ID") == "" {
+		t.Fatal("no escribió X-Request-ID")
+	}
+}
+
+func TestAuthMiddleware(t *testing.T) {
+	setupGin()
+	secret := "secret-super-largo-123"
+
+	makeRouter := func() *gin.Engine {
+		r := gin.New()
+		r.Use(AuthMiddleware(secret))
+		r.GET("/private", func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{
+				"user_id": c.GetString("user_id"),
+				"email":   c.GetString("email"),
+				"role":    c.GetString("role"),
+			})
+		})
+		return r
+	}
+
+	t.Run("sin token", func(t *testing.T) {
+		w := performJSON(makeRouter(), http.MethodGet, "/private", nil)
+		requireStatus(t, w, http.StatusUnauthorized)
+	})
+
+	t.Run("token inválido", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/private", nil)
+		req.Header.Set("Authorization", "Bearer token-malo")
+		w := httptest.NewRecorder()
+		makeRouter().ServeHTTP(w, req)
+		requireStatus(t, w, http.StatusUnauthorized)
+	})
+
+	t.Run("token válido", func(t *testing.T) {
+		token, err := auth.Sign("user-1", "bea@example.com", domain.RoleAdmin, secret, time.Hour)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req := httptest.NewRequest(http.MethodGet, "/private", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		w := httptest.NewRecorder()
+		makeRouter().ServeHTTP(w, req)
+		requireStatus(t, w, http.StatusOK)
+		if !strings.Contains(w.Body.String(), "bea@example.com") || !strings.Contains(w.Body.String(), domain.RoleAdmin) {
+			t.Fatalf("claims no llegaron al handler: %s", w.Body.String())
+		}
+	})
+}
+
+func TestAdminOnlyMiddleware(t *testing.T) {
+	setupGin()
+
+	makeRouter := func(role string) *gin.Engine {
+		r := gin.New()
+		r.Use(func(c *gin.Context) {
+			c.Set("role", role)
+			c.Next()
+		})
+		r.Use(AdminOnly())
+		r.GET("/admin", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"ok": true}) })
+		return r
+	}
+
+	w := performJSON(makeRouter(domain.RoleClient), http.MethodGet, "/admin", nil)
+	requireStatus(t, w, http.StatusForbidden)
+
+	w = performJSON(makeRouter(domain.RoleAdmin), http.MethodGet, "/admin", nil)
+	requireStatus(t, w, http.StatusOK)
+}
+
+type mockSearchIndex struct {
+	items []domain.Product
+	err   error
+}
+
+func (m *mockSearchIndex) IndexProduct(ctx context.Context, p *domain.Product) error { return m.err }
+func (m *mockSearchIndex) BulkIndexProducts(ctx context.Context, ps []domain.Product) error {
+	return m.err
+}
+func (m *mockSearchIndex) SearchProducts(ctx context.Context, query string, limit int) ([]domain.Product, error) {
+	return m.items, m.err
+}
+func (m *mockSearchIndex) SearchByCategory(ctx context.Context, category string, limit int) ([]domain.Product, error) {
+	return m.items, m.err
+}
+func (m *mockSearchIndex) DeleteProduct(ctx context.Context, id string) error { return m.err }
+
+func TestSearchHandlerRoutes(t *testing.T) {
+	setupGin()
+	products := newMockProductRepo()
+	_ = products.Create(context.Background(), &domain.Product{ID: "prod-1", Name: "Pizza", Category: "pizzas"})
+
+	h := NewSearchHandler(&mockSearchIndex{items: []domain.Product{{ID: "prod-1", Name: "Pizza", Category: "pizzas"}}}, products)
+	r := gin.New()
+	h.RegisterRoutes(r)
+
+	w := performJSON(r, http.MethodGet, "/search/products", nil)
+	requireStatus(t, w, http.StatusBadRequest)
+
+	w = performJSON(r, http.MethodGet, "/search/products?q=pizza&limit=2", nil)
+	requireStatus(t, w, http.StatusOK)
+	if !strings.Contains(w.Body.String(), "Pizza") {
+		t.Fatalf("no devolvió producto esperado: %s", w.Body.String())
+	}
+
+	w = performJSON(r, http.MethodGet, "/search/products/category/pizzas?limit=99", nil)
+	requireStatus(t, w, http.StatusOK)
+
+	w = performJSON(r, http.MethodPost, "/search/reindex", nil)
+	requireStatus(t, w, http.StatusOK)
+	if !strings.Contains(w.Body.String(), "indexed") {
+		t.Fatalf("respuesta de reindex inesperada: %s", w.Body.String())
+	}
+}
+
+func TestSearchHandlerErrors(t *testing.T) {
+	setupGin()
+	h := NewSearchHandler(&mockSearchIndex{err: errors.New("elastic down")}, newMockProductRepo())
+	r := gin.New()
+	h.RegisterRoutes(r)
+
+	w := performJSON(r, http.MethodGet, "/search/products?q=pizza", nil)
+	requireStatus(t, w, http.StatusServiceUnavailable)
+
+	w = performJSON(r, http.MethodGet, "/search/products/category/pizzas", nil)
+	requireStatus(t, w, http.StatusServiceUnavailable)
+
+	products := newMockProductRepo()
+	_ = products.Create(context.Background(), &domain.Product{ID: "prod-1", Name: "Pizza"})
+	h = NewSearchHandler(&mockSearchIndex{err: errors.New("bulk fail")}, products)
+	r = gin.New()
+	h.RegisterRoutes(r)
+	w = performJSON(r, http.MethodPost, "/search/reindex", nil)
+	requireStatus(t, w, http.StatusInternalServerError)
+}
+
+func TestParseLimit(t *testing.T) {
+	cases := map[string]int{
+		"":    20,
+		"abc": 20,
+		"-1":  20,
+		"0":   20,
+		"10":  10,
+		"200": 50,
+	}
+	for raw, expected := range cases {
+		if got := parseLimit(raw); got != expected {
+			t.Fatalf("parseLimit(%q)=%d, esperado %d", raw, got, expected)
+		}
+	}
+}
+
+func TestNewRouterHealthAndProtectedRoute(t *testing.T) {
+	setupGin()
+	users := newMockUserRepo()
+	rests := newMockRestaurantRepo()
+	menus := newMockMenuRepo()
+	products := newMockProductRepo()
+	reservations := newMockReservationRepo()
+	orders := newMockOrderRepo()
+	cache := mockCache{}
+
+	r := NewRouter(Deps{
+		AuthService:        service.NewAuthService(users, "secret-super-largo-123", time.Hour),
+		UserService:        service.NewUserService(users),
+		RestaurantService:  service.NewRestaurantService(rests, cache),
+		MenuService:        service.NewMenuService(menus, rests, products, cache),
+		ProductService:     service.NewProductService(products, cache),
+		ReservationService: service.NewReservationService(reservations, rests, cache),
+		OrderService:       service.NewOrderService(orders, products, rests),
+		JWTSecret:          "secret-super-largo-123",
+	})
+
+	w := performJSON(r, http.MethodGet, "/health", nil)
+	requireStatus(t, w, http.StatusOK)
+
+	// Sin JWT debe quedarse en middleware, con eso cubrimos parte del router real.
+	w = performJSON(r, http.MethodGet, "/users/me", nil)
+	requireStatus(t, w, http.StatusUnauthorized)
+}
+
+func TestAuthHandlerBadRequestsAndInvalidLogin(t *testing.T) {
+	setupGin()
+	users := newMockUserRepo()
+	h := NewAuthHandler(service.NewAuthService(users, "secret-super-largo-123", time.Hour))
+
+	r := gin.New()
+	r.POST("/auth/register", h.Register)
+	r.POST("/auth/login", h.Login)
+
+	// JSON inválido: cubre la rama de bad request del register.
+	req := httptest.NewRequest(http.MethodPost, "/auth/register", strings.NewReader("{"))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	requireStatus(t, w, http.StatusBadRequest)
+
+	// Register incompleto: también debe quedarse en validación/binding.
+	w = performJSON(r, http.MethodPost, "/auth/register", map[string]any{
+		"email": "bea@example.com",
+	})
+	requireStatus(t, w, http.StatusBadRequest)
+
+	// Login inválido por formato de request.
+	w = performJSON(r, http.MethodPost, "/auth/login", map[string]any{
+		"email": "bea@example.com",
+	})
+	requireStatus(t, w, http.StatusBadRequest)
+
+	// Login con usuario inexistente: cubre error de credenciales.
+	w = performJSON(r, http.MethodPost, "/auth/login", domain.LoginRequest{
+		Email:    "nadie@example.com",
+		Password: "123456",
+	})
+	requireStatus(t, w, http.StatusUnauthorized)
 }

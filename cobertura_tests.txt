@@ -1,3 +1,0 @@
-ok  	restaurants-e2/internal/transport/http	4.215s	coverage: 40.3% of statements
-ok  	restaurants-e2/internal/adapters/repomongo	2.713s	coverage: 70.8% of statements
-ok  	restaurants-e2/internal/adapters/searches	0.654s	coverage: 64.3% of statements

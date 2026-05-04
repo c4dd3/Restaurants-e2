@@ -11,6 +11,7 @@ import (
 
 	"github.com/elastic/go-elasticsearch/v8"
 
+	"restaurants-e2/internal/config"
 	"restaurants-e2/internal/domain"
 )
 
@@ -179,4 +180,268 @@ func TestBulkIndexProductsOmiteProductosSinID(t *testing.T) {
 	if bulkLines != 2 {
 		t.Fatalf("se esperaban 2 líneas bulk para 1 producto válido, obtuvo %d", bulkLines)
 	}
+}
+
+func TestNewClient(t *testing.T) {
+	// NewClient hace un ping a /, entonces el mock debe verse como Elastic real.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		markAsElasticsearch(w)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"version":{"number":"8.14.0"}}`))
+	}))
+	defer server.Close()
+
+	es, err := NewClient(config.SearchConfig{URL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if es == nil {
+		t.Fatal("esperaba cliente elastic")
+	}
+}
+
+func TestNewClientError(t *testing.T) {
+	// Puerto cerrado a propósito: solo queremos cubrir el camino de error.
+	_, err := NewClient(config.SearchConfig{URL: "http://127.0.0.1:1"})
+	if err == nil {
+		t.Fatal("esperaba error de conexión")
+	}
+}
+
+func TestIndexRamasDeError(t *testing.T) {
+	t.Run("índice ya existe y bulk vacío", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			markAsElasticsearch(w)
+			if r.Method == http.MethodHead {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			t.Fatalf("request inesperado: %s %s", r.Method, r.URL.Path)
+		}))
+		defer server.Close()
+
+		es, _ := elasticsearch.NewClient(elasticsearch.Config{Addresses: []string{server.URL}})
+		idx, err := NewIndex(context.Background(), es, "") // vacío usa products por defecto
+		if err != nil {
+			t.Fatal(err)
+		}
+		if idx.indexName != "products" {
+			t.Fatalf("índice por defecto incorrecto: %s", idx.indexName)
+		}
+		if err := idx.BulkIndexProducts(context.Background(), nil); err != nil {
+			t.Fatal(err)
+		}
+		if err := idx.BulkIndexProducts(context.Background(), []domain.Product{{Name: "Sin ID"}}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("index product nil", func(t *testing.T) {
+		idx := &Index{}
+		if err := idx.IndexProduct(context.Background(), nil); err == nil {
+			t.Fatal("esperaba error con producto nil")
+		}
+	})
+
+	t.Run("bulk con errors true", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			markAsElasticsearch(w)
+			if r.Method == http.MethodHead {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			if strings.Contains(r.URL.Path, "/_bulk") {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"errors":true,"items":[{"index":{"error":{"reason":"falló"}}}]}`))
+				return
+			}
+			t.Fatalf("request inesperado: %s %s", r.Method, r.URL.Path)
+		}))
+		defer server.Close()
+
+		es, _ := elasticsearch.NewClient(elasticsearch.Config{Addresses: []string{server.URL}})
+		idx, err := NewIndex(context.Background(), es, "products_test")
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = idx.BulkIndexProducts(context.Background(), []domain.Product{{ID: "prod-1", Name: "Pizza"}})
+		if err == nil {
+			t.Fatal("esperaba error por bulk con errors=true")
+		}
+	})
+
+	t.Run("delete 404 no falla", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			markAsElasticsearch(w)
+			if r.Method == http.MethodHead {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			if r.Method == http.MethodDelete {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			t.Fatalf("request inesperado: %s %s", r.Method, r.URL.Path)
+		}))
+		defer server.Close()
+
+		es, _ := elasticsearch.NewClient(elasticsearch.Config{Addresses: []string{server.URL}})
+		idx, err := NewIndex(context.Background(), es, "products_test")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := idx.DeleteProduct(context.Background(), "missing"); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+func TestIndexMoreErrorBranches(t *testing.T) {
+	t.Run("ensure index falla con status raro", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			markAsElasticsearch(w)
+			if r.Method == http.MethodHead {
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte(`boom`))
+				return
+			}
+			t.Fatalf("request inesperado: %s %s", r.Method, r.URL.Path)
+		}))
+		defer server.Close()
+
+		es, _ := elasticsearch.NewClient(elasticsearch.Config{Addresses: []string{server.URL}})
+		_, err := NewIndex(context.Background(), es, "products_test")
+		if err == nil {
+			t.Fatal("esperaba error si HEAD del índice falla")
+		}
+	})
+
+	t.Run("crear índice devuelve error", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			markAsElasticsearch(w)
+			switch r.Method {
+			case http.MethodHead:
+				w.WriteHeader(http.StatusNotFound)
+			case http.MethodPut:
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(`mapping malo`))
+			default:
+				t.Fatalf("request inesperado: %s %s", r.Method, r.URL.Path)
+			}
+		}))
+		defer server.Close()
+
+		es, _ := elasticsearch.NewClient(elasticsearch.Config{Addresses: []string{server.URL}})
+		_, err := NewIndex(context.Background(), es, "products_test")
+		if err == nil {
+			t.Fatal("esperaba error al crear índice")
+		}
+	})
+
+	t.Run("index product con error HTTP", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			markAsElasticsearch(w)
+			if r.Method == http.MethodHead {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			if strings.Contains(r.URL.Path, "/_doc/prod-error") {
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte(`no indexó`))
+				return
+			}
+			t.Fatalf("request inesperado: %s %s", r.Method, r.URL.Path)
+		}))
+		defer server.Close()
+
+		es, _ := elasticsearch.NewClient(elasticsearch.Config{Addresses: []string{server.URL}})
+		idx, err := NewIndex(context.Background(), es, "products_test")
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = idx.IndexProduct(context.Background(), &domain.Product{ID: "prod-error", Name: "Error", Category: "test"})
+		if err == nil {
+			t.Fatal("esperaba error de indexación")
+		}
+	})
+
+	t.Run("búsqueda devuelve error HTTP", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			markAsElasticsearch(w)
+			if r.Method == http.MethodHead {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			if strings.Contains(r.URL.Path, "/_search") {
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte(`sin search`))
+				return
+			}
+			t.Fatalf("request inesperado: %s %s", r.Method, r.URL.Path)
+		}))
+		defer server.Close()
+
+		es, _ := elasticsearch.NewClient(elasticsearch.Config{Addresses: []string{server.URL}})
+		idx, err := NewIndex(context.Background(), es, "products_test")
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = idx.SearchProducts(context.Background(), "pizza", -5)
+		if err == nil {
+			t.Fatal("esperaba error de búsqueda")
+		}
+	})
+
+	t.Run("búsqueda con JSON inválido", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			markAsElasticsearch(w)
+			if r.Method == http.MethodHead {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			if strings.Contains(r.URL.Path, "/_search") {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{json roto`))
+				return
+			}
+			t.Fatalf("request inesperado: %s %s", r.Method, r.URL.Path)
+		}))
+		defer server.Close()
+
+		es, _ := elasticsearch.NewClient(elasticsearch.Config{Addresses: []string{server.URL}})
+		idx, err := NewIndex(context.Background(), es, "products_test")
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = idx.SearchByCategory(context.Background(), "pizzas", 200)
+		if err == nil {
+			t.Fatal("esperaba error por JSON inválido")
+		}
+	})
+
+	t.Run("delete 500", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			markAsElasticsearch(w)
+			if r.Method == http.MethodHead {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			if r.Method == http.MethodDelete {
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte(`no borró`))
+				return
+			}
+			t.Fatalf("request inesperado: %s %s", r.Method, r.URL.Path)
+		}))
+		defer server.Close()
+
+		es, _ := elasticsearch.NewClient(elasticsearch.Config{Addresses: []string{server.URL}})
+		idx, err := NewIndex(context.Background(), es, "products_test")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := idx.DeleteProduct(context.Background(), "prod-1"); err == nil {
+			t.Fatal("esperaba error al borrar")
+		}
+	})
 }

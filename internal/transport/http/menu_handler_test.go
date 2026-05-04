@@ -2,6 +2,7 @@ package http
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -45,4 +46,45 @@ func TestMenuHandlerCreateGetUpdateDelete(t *testing.T) {
 
 	w = performJSON(r, http.MethodDelete, "/menus/"+created.ID, nil)
 	requireStatus(t, w, http.StatusNoContent)
+}
+
+func TestMenuHandlerErrors(t *testing.T) {
+	setupGin()
+	rests := newMockRestaurantRepo()
+	menus := newMockMenuRepo()
+	products := newMockProductRepo()
+
+	h := NewMenuHandler(service.NewMenuService(menus, rests, products, mockCache{}))
+
+	r := gin.New()
+	r.POST("/menus", func(c *gin.Context) {
+		c.Set("role", domain.RoleAdmin)
+		h.Create(c)
+	})
+	r.GET("/menus/:id", h.GetByID)
+	r.PUT("/menus/:id", func(c *gin.Context) {
+		c.Set("role", domain.RoleAdmin)
+		h.Update(c)
+	})
+	r.DELETE("/menus/:id", func(c *gin.Context) {
+		c.Set("role", domain.RoleAdmin)
+		h.Delete(c)
+	})
+
+	// Menú inexistente.
+	w := performJSON(r, http.MethodGet, "/menus/no-existe", nil)
+	requireStatus(t, w, http.StatusNotFound)
+
+	// Create inválido.
+	w = performJSON(r, http.MethodPost, "/menus", map[string]any{
+		"name": "",
+	})
+	requireStatus(t, w, http.StatusBadRequest)
+
+	// Update con JSON malo.
+	req := httptest.NewRequest(http.MethodPut, "/menus/no-existe", strings.NewReader("{"))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	requireStatus(t, w, http.StatusBadRequest)
 }

@@ -39,3 +39,32 @@ func TestOrderHandlerCreateAndGet(t *testing.T) {
 	w = performJSON(r, http.MethodGet, "/orders/"+created.ID, nil)
 	requireStatus(t, w, http.StatusOK)
 }
+
+func TestOrderHandlerErrors(t *testing.T) {
+	setupGin()
+	rests := newMockRestaurantRepo()
+	products := newMockProductRepo()
+	orders := newMockOrderRepo()
+	h := NewOrderHandler(service.NewOrderService(orders, products, rests))
+
+	r := gin.New()
+	r.POST("/orders", func(c *gin.Context) {
+		c.Set("user_id", "user-1")
+		h.Create(c)
+	})
+	r.GET("/orders/:id", func(c *gin.Context) {
+		c.Set("user_id", "user-1")
+		c.Set("role", domain.RoleClient)
+		h.GetByID(c)
+	})
+
+	// Orden inválida.
+	w := performJSON(r, http.MethodPost, "/orders", map[string]any{
+		"restaurant_id": "",
+	})
+	requireStatus(t, w, http.StatusBadRequest)
+
+	// Orden inexistente.
+	w = performJSON(r, http.MethodGet, "/orders/no-existe", nil)
+	requireStatus(t, w, http.StatusNotFound)
+}

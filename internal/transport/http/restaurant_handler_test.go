@@ -42,3 +42,27 @@ func TestRestaurantHandlerCreateListAndGet(t *testing.T) {
 	w = performJSON(r, http.MethodGet, "/restaurants/"+created.ID, nil)
 	requireStatus(t, w, http.StatusOK)
 }
+
+func TestRestaurantHandlerErrors(t *testing.T) {
+	setupGin()
+	rests := newMockRestaurantRepo()
+	h := NewRestaurantHandler(service.NewRestaurantService(rests, mockCache{}))
+
+	r := gin.New()
+	r.POST("/restaurants", func(c *gin.Context) {
+		c.Set("user_id", "admin-1")
+		c.Set("role", domain.RoleAdmin)
+		h.Create(c)
+	})
+	r.GET("/restaurants/:id", h.GetByID)
+
+	// Request inválido para cubrir el ShouldBindJSON.
+	w := performJSON(r, http.MethodPost, "/restaurants", map[string]any{
+		"name": "",
+	})
+	requireStatus(t, w, http.StatusBadRequest)
+
+	// Restaurante inexistente.
+	w = performJSON(r, http.MethodGet, "/restaurants/no-existe", nil)
+	requireStatus(t, w, http.StatusNotFound)
+}

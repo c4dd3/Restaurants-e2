@@ -84,3 +84,57 @@ func TestUserRepoMongoCRUD(t *testing.T) {
 		t.Fatalf("se esperaba usuario eliminado, obtuvo %#v", missing)
 	}
 }
+
+// Casos extra: ids automáticos, fechas y búsquedas que no encuentran nada.
+func TestUserRepoMongoDefaultsAndMissing(t *testing.T) {
+	repos, cleanup := testMongoRepositories(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	u := &domain.User{Name: "Sin ID", Email: "sinid@example.com", Password: "hash", Role: domain.RoleAdmin}
+	if err := repos.Users.Create(ctx, u); err != nil {
+		t.Fatal(err)
+	}
+	if u.ID == "" || u.CreatedAt.IsZero() || u.UpdatedAt.IsZero() {
+		t.Fatalf("no llenó campos automáticos: %#v", u)
+	}
+
+	missing, err := repos.Users.FindByID(ctx, "no-existe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if missing != nil {
+		t.Fatalf("esperaba nil para usuario inexistente, obtuvo %#v", missing)
+	}
+
+	missing, err = repos.Users.FindByEmail(ctx, "nadie@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if missing != nil {
+		t.Fatalf("esperaba nil para email inexistente, obtuvo %#v", missing)
+	}
+
+	updated, err := repos.Users.Update(ctx, "no-existe", &domain.UpdateUserRequest{Name: "Nada"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated != nil {
+		t.Fatalf("esperaba nil al actualizar usuario inexistente, obtuvo %#v", updated)
+	}
+
+	// Borrar un id inexistente no debería romper el flujo.
+	if err := repos.Users.Delete(ctx, "no-existe"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMongoClientError(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	_, err := NewClient(ctx, config.MongoConfig{URI: "mongodb://127.0.0.1:1", DBName: "restaurants_unit_test"})
+	if err == nil {
+		t.Fatal("esperaba error conectando a un Mongo inexistente")
+	}
+}

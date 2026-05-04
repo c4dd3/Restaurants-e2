@@ -46,3 +46,49 @@ func TestReservationRepoMongoCreateFindCancelAndAvailability(t *testing.T) {
 		t.Fatalf("estado esperado cancelled, obtuvo %s", cancelled.Status)
 	}
 }
+
+func TestReservationRepoMongoDefaultsMissingAndAvailabilityBranches(t *testing.T) {
+	repos, cleanup := testMongoRepositories(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// Si no existe el restaurante, la disponibilidad queda en 0 y no revienta.
+	available, err := repos.Reservations.CheckAvailability(ctx, "rest-no-existe", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if available != 0 {
+		t.Fatalf("disponibilidad esperada 0 para restaurante inexistente, obtuvo %d", available)
+	}
+
+	res := &domain.Reservation{RestaurantID: "rest-2", UserID: "user-1", Date: time.Now().UTC(), PartySize: 2}
+	if err := repos.Reservations.Create(ctx, res); err != nil {
+		t.Fatal(err)
+	}
+	if res.ID == "" || res.Status != domain.StatusPending || res.CreatedAt.IsZero() {
+		t.Fatalf("no llenó defaults de reserva: %#v", res)
+	}
+
+	missing, err := repos.Reservations.FindByID(ctx, "no-existe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if missing != nil {
+		t.Fatalf("esperaba nil para reserva inexistente, obtuvo %#v", missing)
+	}
+
+	if err := repos.Reservations.Cancel(ctx, "no-existe"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReservationRepoMongoCreateRequiresRestaurantID(t *testing.T) {
+	repos, cleanup := testMongoRepositories(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	err := repos.Reservations.Create(ctx, &domain.Reservation{UserID: "user-1", PartySize: 2})
+	if err == nil {
+		t.Fatal("esperaba error si falta restaurant_id")
+	}
+}
