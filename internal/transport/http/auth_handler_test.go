@@ -260,7 +260,7 @@ func TestAuthHandlerRegisterAndLogin(t *testing.T) {
 	r.POST("/auth/register", h.Register)
 	r.POST("/auth/login", h.Login)
 
-	registerBody := domain.RegisterRequest{Name: "Bea", Email: "bea@example.com", Password: "123456", Role: domain.RoleClient}
+	registerBody := domain.RegisterRequest{Name: "Bea", Email: "bea@example.com", Password: "123456"}
 	w := performJSON(r, http.MethodPost, "/auth/register", registerBody)
 	requireStatus(t, w, http.StatusCreated)
 	if !strings.Contains(w.Body.String(), "token") {
