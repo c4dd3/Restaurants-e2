@@ -87,4 +87,12 @@ func TestMenuHandlerErrors(t *testing.T) {
 	w = httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	requireStatus(t, w, http.StatusBadRequest)
+
+	// Update con menú inexistente (service retorna ErrNotFound → 404).
+	w = performJSON(r, http.MethodPut, "/menus/no-existe", domain.UpdateMenuRequest{Name: "X"})
+	requireStatus(t, w, http.StatusNotFound)
+
+	// Delete con menú inexistente (service retorna ErrNotFound → 404).
+	w = performJSON(r, http.MethodDelete, "/menus/no-existe", nil)
+	requireStatus(t, w, http.StatusNotFound)
 }

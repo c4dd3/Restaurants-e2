@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"net/http"
 	"testing"
 	"time"
@@ -59,4 +60,37 @@ func TestReservationHandlerErrors(t *testing.T) {
 	// Cancelar reserva inexistente.
 	w = performJSON(r, http.MethodDelete, "/reservations/no-existe", nil)
 	requireStatus(t, w, http.StatusNotFound)
+
+	// Crear reserva con restaurante inexistente → service retorna ErrValidation → 422.
+	w = performJSON(r, http.MethodPost, "/reservations", domain.CreateReservationRequest{
+		RestaurantID: "rest-no-existe",
+		Date:         time.Now().Add(24 * time.Hour),
+		PartySize:    2,
+	})
+	requireStatus(t, w, http.StatusUnprocessableEntity)
+}
+
+func TestReservationHandlerCancelForbidden(t *testing.T) {
+	setupGin()
+	rests := newMockRestaurantRepo()
+	reservations := newMockReservationRepo()
+	_ = rests.Create(nil, &domain.Restaurant{ID: "rest-1", Name: "Soda TEC", Capacity: 20})
+
+	// Crear reserva para user-1
+	svc := service.NewReservationService(reservations, rests, mockCache{})
+	res, _ := svc.Create(context.Background(), "user-1", domain.CreateReservationRequest{
+		RestaurantID: "rest-1",
+		Date:         time.Now().Add(24 * time.Hour),
+		PartySize:    2,
+	})
+
+	h := NewReservationHandler(svc)
+	r := gin.New()
+	r.DELETE("/reservations/:id", func(c *gin.Context) {
+		c.Set("user_id", "user-2") // usuario distinto al dueño
+		h.Cancel(c)
+	})
+
+	w := performJSON(r, http.MethodDelete, "/reservations/"+res.ID, nil)
+	requireStatus(t, w, http.StatusForbidden)
 }
