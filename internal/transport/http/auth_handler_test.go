@@ -176,7 +176,13 @@ func (r *mockMenuRepo) Update(ctx context.Context, id string, req *domain.Update
 	copy := *m
 	return &copy, nil
 }
-func (r *mockMenuRepo) Delete(ctx context.Context, id string) error { delete(r.menus, id); return nil }
+func (r *mockMenuRepo) Delete(ctx context.Context, id string) error {
+	if _, ok := r.menus[id]; !ok {
+		return domain.ErrNotFound
+	}
+	delete(r.menus, id)
+	return nil
+}
 
 type mockReservationRepo struct {
 	reservations map[string]*domain.Reservation

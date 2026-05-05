@@ -68,10 +68,10 @@ func TestOrderHandlerErrors(t *testing.T) {
 	w = performJSON(r, http.MethodGet, "/orders/no-existe", nil)
 	requireStatus(t, w, http.StatusNotFound)
 
-	// Crear orden con restaurante inexistente → service retorna ErrNotFound → 404.
+	// Crear orden con restaurante inexistente → service retorna ErrValidation → 422.
 	w = performJSON(r, http.MethodPost, "/orders", domain.CreateOrderRequest{
 		RestaurantID: "rest-no-existe",
 		Items:        []domain.OrderItemRequest{{ProductID: "prod-no-existe", Quantity: 1}},
 	})
-	requireStatus(t, w, http.StatusNotFound)
+	requireStatus(t, w, http.StatusUnprocessableEntity)
 }
