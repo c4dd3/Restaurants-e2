@@ -118,3 +118,37 @@ func TestReservationServiceCancelNotFound(t *testing.T) {
 		t.Errorf("esperado ErrNotFound, obtenido %v", err)
 	}
 }
+
+func TestReservationServiceCreateRestaurantUnexpectedError(t *testing.T) {
+	// Cubre la rama: FindByID falla con un error que NO es ErrNotFound (línea 47).
+	rests := newMockRestaurantRepo()
+	rests.findByIDErr = errors.New("db connection lost")
+	svc := newReservationSvc(newMockReservationRepo(10), rests, newMockCache())
+
+	_, err := svc.Create(context.Background(), "user-1", domain.CreateReservationRequest{
+		RestaurantID: "rest-1",
+		Date:         time.Now().Add(time.Hour),
+		PartySize:    2,
+	})
+	if err == nil || errors.Is(err, domain.ErrValidation) {
+		t.Errorf("esperado error inesperado propagado, obtenido %v", err)
+	}
+}
+
+func TestReservationServiceCreateCheckAvailabilityError(t *testing.T) {
+	// Cubre la rama: CheckAvailability falla (línea 53).
+	rests := newMockRestaurantRepo()
+	rests.restaurants["rest-1"] = &domain.Restaurant{ID: "rest-1", Capacity: 50}
+	res := newMockReservationRepo(10)
+	res.checkAvailErr = errors.New("availability check failed")
+	svc := newReservationSvc(res, rests, newMockCache())
+
+	_, err := svc.Create(context.Background(), "user-1", domain.CreateReservationRequest{
+		RestaurantID: "rest-1",
+		Date:         time.Now().Add(time.Hour),
+		PartySize:    2,
+	})
+	if err == nil {
+		t.Error("esperado error de CheckAvailability propagado, obtenido nil")
+	}
+}

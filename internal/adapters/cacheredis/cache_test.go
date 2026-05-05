@@ -6,55 +6,53 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
+
 	"restaurants-e2/internal/config"
 	"restaurants-e2/internal/ports"
 )
 
-// testRedisClient crea un cliente Redis real para pruebas.
-// Salta el test si Redis no está disponible en el entorno.
-func testRedisClient(t *testing.T) *Cache {
+// startMiniRedis levanta un servidor Redis en memoria para pruebas.
+// No requiere Docker ni infraestructura externa.
+func startMiniRedis(t *testing.T) *Cache {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	client, err := NewClient(ctx, config.RedisConfig{
-		Addr: "localhost:6379",
-	})
+	mr, err := miniredis.Run()
 	if err != nil {
-		t.Skipf("Redis no disponible para pruebas: %v", err)
+		t.Fatalf("no se pudo iniciar miniredis: %v", err)
+	}
+	t.Cleanup(mr.Close)
+
+	client, err := NewClient(context.Background(), config.RedisConfig{Addr: mr.Addr()})
+	if err != nil {
+		t.Fatalf("no se pudo conectar a miniredis: %v", err)
 	}
 	t.Cleanup(func() { client.Close() })
 	return New(client)
 }
 
 func TestCacheGetMiss(t *testing.T) {
-	c := testRedisClient(t)
-	ctx := context.Background()
-
+	c := startMiniRedis(t)
 	var dest string
-	err := c.Get(ctx, "clave-inexistente-xyz", &dest)
+	err := c.Get(context.Background(), "clave-inexistente", &dest)
 	if !errors.As(err, &ports.ErrCacheMiss{}) {
-		t.Fatalf("Get en cache vacío debió retornar ErrCacheMiss, obtuvo %v", err)
+		t.Fatalf("esperaba ErrCacheMiss en cache vacío, obtuvo %v", err)
 	}
 }
 
 func TestCacheSetAndGet(t *testing.T) {
-	c := testRedisClient(t)
+	c := startMiniRedis(t)
 	ctx := context.Background()
 
 	type payload struct {
 		Name string `json:"name"`
 		Age  int    `json:"age"`
 	}
-	key := "test:cache:setget"
-	defer c.Del(ctx, key)
-
-	if err := c.Set(ctx, key, payload{Name: "Bea", Age: 22}, 5*time.Second); err != nil {
+	if err := c.Set(ctx, "test:setget", payload{Name: "Bea", Age: 22}, 5*time.Second); err != nil {
 		t.Fatalf("Set falló: %v", err)
 	}
 
 	var out payload
-	if err := c.Get(ctx, key, &out); err != nil {
+	if err := c.Get(ctx, "test:setget", &out); err != nil {
 		t.Fatalf("Get tras Set falló: %v", err)
 	}
 	if out.Name != "Bea" || out.Age != 22 {
@@ -63,42 +61,37 @@ func TestCacheSetAndGet(t *testing.T) {
 }
 
 func TestCacheDel(t *testing.T) {
-	c := testRedisClient(t)
+	c := startMiniRedis(t)
 	ctx := context.Background()
 
-	key := "test:cache:del"
-	if err := c.Set(ctx, key, "valor", 5*time.Second); err != nil {
+	if err := c.Set(ctx, "test:del", "valor", 5*time.Second); err != nil {
 		t.Fatalf("Set falló: %v", err)
 	}
-
-	if err := c.Del(ctx, key); err != nil {
+	if err := c.Del(ctx, "test:del"); err != nil {
 		t.Fatalf("Del falló: %v", err)
 	}
 
 	var dest string
-	err := c.Get(ctx, key, &dest)
+	err := c.Get(ctx, "test:del", &dest)
 	if !errors.As(err, &ports.ErrCacheMiss{}) {
 		t.Fatalf("tras Del esperaba ErrCacheMiss, obtuvo %v", err)
 	}
 }
 
-func TestCacheDelEmpty(t *testing.T) {
-	c := testRedisClient(t)
-	ctx := context.Background()
-
-	// Del sin claves no debe fallar (rama vacía).
-	if err := c.Del(ctx); err != nil {
+func TestCacheDelNoKeys(t *testing.T) {
+	c := startMiniRedis(t)
+	// Del sin claves cubre la rama de guarda len(keys)==0.
+	if err := c.Del(context.Background()); err != nil {
 		t.Fatalf("Del sin claves falló: %v", err)
 	}
 }
 
 func TestCacheDelByPattern(t *testing.T) {
-	c := testRedisClient(t)
+	c := startMiniRedis(t)
 	ctx := context.Background()
 
-	prefix := "test:pattern:del:"
-	keys := []string{prefix + "a", prefix + "b", prefix + "c"}
-	for _, k := range keys {
+	prefix := "test:pattern:"
+	for _, k := range []string{prefix + "a", prefix + "b", prefix + "c"} {
 		if err := c.Set(ctx, k, "x", 5*time.Second); err != nil {
 			t.Fatalf("Set %s falló: %v", k, err)
 		}
@@ -109,7 +102,7 @@ func TestCacheDelByPattern(t *testing.T) {
 	}
 
 	var dest string
-	for _, k := range keys {
+	for _, k := range []string{prefix + "a", prefix + "b", prefix + "c"} {
 		err := c.Get(ctx, k, &dest)
 		if !errors.As(err, &ports.ErrCacheMiss{}) {
 			t.Fatalf("tras DelByPattern esperaba miss en %s, obtuvo %v", k, err)
@@ -118,11 +111,9 @@ func TestCacheDelByPattern(t *testing.T) {
 }
 
 func TestCacheDelByPatternNoMatches(t *testing.T) {
-	c := testRedisClient(t)
-	ctx := context.Background()
-
-	// Patrón que no coincide con nada — rama len(toDelete)==0.
-	if err := c.DelByPattern(ctx, "test:pattern:vacio:xyz:*"); err != nil {
+	c := startMiniRedis(t)
+	// Cubre la rama len(toDelete)==0 cuando el patrón no coincide con nada.
+	if err := c.DelByPattern(context.Background(), "patron:que:no:existe:*"); err != nil {
 		t.Fatalf("DelByPattern sin matches falló: %v", err)
 	}
 }
@@ -133,6 +124,6 @@ func TestNewClientBadAddr(t *testing.T) {
 
 	_, err := NewClient(ctx, config.RedisConfig{Addr: "127.0.0.1:1"})
 	if err == nil {
-		t.Fatal("NewClient con addr inválida debió retornar error")
+		t.Fatal("NewClient con dirección inválida debió retornar error")
 	}
 }
