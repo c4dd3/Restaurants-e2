@@ -148,12 +148,10 @@ func TestMenuRepoMongoUpdateProductsAndMissing(t *testing.T) {
 		}
 	}
 
-	oldProduct, err := repos.Products.FindByID(ctx, "prod-viejo")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if oldProduct != nil {
-		t.Fatalf("el producto viejo debió borrarse, obtuvo %#v", oldProduct)
+	// El producto viejo fue eliminado por replaceProducts → debe retornar ErrNotFound.
+	_, err = repos.Products.FindByID(ctx, "prod-viejo")
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("el producto viejo debió borrarse (esperaba ErrNotFound), obtuvo %v", err)
 	}
 
 	missing, err := repos.Menus.FindByID(ctx, "no-existe")
