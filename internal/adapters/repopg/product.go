@@ -142,8 +142,6 @@ func collectProducts(ctx context.Context, pool *pgxpool.Pool, q string, args ...
 	if err != nil {
 		return nil, fmt.Errorf("collect products: %w", err)
 	}
-	if products == nil {
-		return []domain.Product{}, nil
-	}
+	// pgx v5 CollectRows nunca retorna nil — retorna slice vacío si no hay filas.
 	return products, nil
 }

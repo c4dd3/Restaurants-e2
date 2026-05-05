@@ -35,7 +35,7 @@ func (r *RestaurantRepoMongo) FindByID(ctx context.Context, id string) (*domain.
 	var out domain.Restaurant
 	err := r.coll.FindOne(ctx, bson.M{"_id": id}).Decode(&out)
 	if errors.Is(err, mongo.ErrNoDocuments) {
-		return nil, nil
+		return nil, domain.ErrNotFound
 	}
 	if err != nil {
 		return nil, err

@@ -151,9 +151,7 @@ func fetchProductsByMenuID(ctx context.Context, q querier, menuID string) ([]dom
 	if err != nil {
 		return nil, fmt.Errorf("collect products: %w", err)
 	}
-	if products == nil {
-		return []domain.Product{}, nil
-	}
+	// pgx v5 CollectRows nunca retorna nil — retorna slice vacío si no hay filas.
 	return products, nil
 }
 

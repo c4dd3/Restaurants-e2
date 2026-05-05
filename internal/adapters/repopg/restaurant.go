@@ -74,8 +74,6 @@ func (r *RestaurantRepoPg) FindAll(ctx context.Context) ([]domain.Restaurant, er
 	if err != nil {
 		return nil, fmt.Errorf("collect restaurants: %w", err)
 	}
-	if restaurants == nil {
-		return []domain.Restaurant{}, nil
-	}
+	// pgx v5 CollectRows siempre retorna un slice no-nil; este return es el caso base.
 	return restaurants, nil
 }

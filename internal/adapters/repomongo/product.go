@@ -26,7 +26,7 @@ func (r *ProductRepoMongo) FindByID(ctx context.Context, id string) (*domain.Pro
 	var product domain.Product
 	err := r.coll.FindOne(ctx, bson.M{"_id": id}).Decode(&product)
 	if errors.Is(err, mongo.ErrNoDocuments) {
-		return nil, nil
+		return nil, domain.ErrNotFound
 	}
 	if err != nil {
 		return nil, err

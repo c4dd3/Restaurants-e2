@@ -43,7 +43,7 @@ func (r *OrderRepoMongo) FindByID(ctx context.Context, id string) (*domain.Order
 	var out domain.Order
 	err := r.coll.FindOne(ctx, bson.M{"_id": id}).Decode(&out)
 	if errors.Is(err, mongo.ErrNoDocuments) {
-		return nil, nil
+		return nil, domain.ErrNotFound
 	}
 	if err != nil {
 		return nil, err

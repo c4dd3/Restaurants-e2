@@ -27,7 +27,7 @@ func (r *MenuRepoMongo) FindByID(ctx context.Context, id string) (*domain.Menu, 
 	var m domain.Menu
 	err := r.coll.FindOne(ctx, bson.M{"_id": id}).Decode(&m)
 	if errors.Is(err, mongo.ErrNoDocuments) {
-		return nil, nil
+		return nil, domain.ErrNotFound
 	}
 	if err != nil {
 		return nil, err
@@ -77,7 +77,7 @@ func (r *MenuRepoMongo) Update(ctx context.Context, id string, req *domain.Updat
 		options.FindOneAndUpdate().SetReturnDocument(options.After),
 	).Decode(&updated)
 	if errors.Is(err, mongo.ErrNoDocuments) {
-		return nil, nil
+		return nil, domain.ErrNotFound
 	}
 	if err != nil {
 		return nil, err

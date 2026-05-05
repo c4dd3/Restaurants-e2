@@ -48,6 +48,7 @@ services:
     environment:
       API_PORT: 8080
       DB_ENGINE: ${DB_ENGINE}
+      POSTGRES_HOST: postgres   # dentro de Docker el host es el nombre del servicio, no localhost
     depends_on:
       redis:
         condition: service_started
@@ -68,6 +69,7 @@ services:
     environment:
       AUTH_PORT: 8081
       DB_ENGINE: ${DB_ENGINE}
+      POSTGRES_HOST: postgres
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8081/health"]
       interval: 10s
@@ -85,6 +87,7 @@ services:
     environment:
       SEARCH_PORT: 8082
       DB_ENGINE: ${DB_ENGINE}
+      POSTGRES_HOST: postgres
     depends_on:
       elasticsearch:
         condition: service_healthy
