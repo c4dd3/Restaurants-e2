@@ -174,3 +174,14 @@ func TestProductRepoMongoValidationNoDB(t *testing.T) {
 		t.Error("Update: esperaba error por category vacía, obtuvo nil")
 	}
 }
+
+// TestNewProductRepository cubre el constructor standalone que no usa NewRepositories.
+func TestNewProductRepository(t *testing.T) {
+	repos, cleanup := testMongoRepositories(t)
+	defer cleanup()
+	// Obtenemos la colección a través del cliente para poder llamar NewProductRepository.
+	repo := NewProductRepository(repos.Products.(*ProductRepoMongo).coll)
+	if repo == nil {
+		t.Fatal("NewProductRepository retornó nil")
+	}
+}
