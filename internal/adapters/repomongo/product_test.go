@@ -175,8 +175,8 @@ func TestProductRepoMongoValidationNoDB(t *testing.T) {
 	}
 }
 
-// TestNewProductRepository cubre el constructor standalone que no usa NewRepositories.
-func TestNewProductRepository(t *testing.T) {
+// TestNewProductRepositoryConstructor cubre el constructor standalone que no usa NewRepositories.
+func TestNewProductRepositoryConstructor(t *testing.T) {
 	repos, cleanup := testMongoRepositories(t)
 	defer cleanup()
 	// Obtenemos la colección a través del cliente para poder llamar NewProductRepository.
