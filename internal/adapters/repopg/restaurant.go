@@ -53,13 +53,12 @@ func (r *RestaurantRepoPg) FindByID(ctx context.Context, id string) (*domain.Res
 		return nil, domain.ErrNotFound
 	}
 	if err != nil {
-		return nil, fmt.Errorf("collect restaurant: %w", err)
+		return nil, pgErr(err)
 	}
 	return &rest, nil
 }
 
 // FindAll retorna todos los restaurantes ordenados por fecha de creación descendente.
-// Garantiza slice no-nil — retorna []domain.Restaurant{} si no hay registros.
 func (r *RestaurantRepoPg) FindAll(ctx context.Context) ([]domain.Restaurant, error) {
 	const q = `
 		SELECT id, name, address, phone, description, admin_id, capacity, created_at, updated_at
@@ -74,8 +73,6 @@ func (r *RestaurantRepoPg) FindAll(ctx context.Context) ([]domain.Restaurant, er
 	if err != nil {
 		return nil, fmt.Errorf("collect restaurants: %w", err)
 	}
-	if restaurants == nil {
-		return []domain.Restaurant{}, nil
-	}
+	// pgx v5 CollectRows siempre retorna un slice no-nil; este return es el caso base.
 	return restaurants, nil
 }
