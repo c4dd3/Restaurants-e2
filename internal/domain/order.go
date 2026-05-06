@@ -9,7 +9,7 @@ type Order struct {
 	UserID        string      `json:"user_id"                   db:"user_id"       bson:"user_id"`
 	RestaurantID  string      `json:"restaurant_id"             db:"restaurant_id" bson:"restaurant_id"`
 	ReservationID *string     `json:"reservation_id,omitempty"  db:"reservation_id" bson:"reservation_id,omitempty"`
-	Items         []OrderItem `json:"items,omitempty"           bson:"items,omitempty"`
+	Items         []OrderItem `json:"items,omitempty"           db:"-" bson:"items,omitempty"` // db:"-": no es columna SQL; se carga por query separada.
 	Total         float64     `json:"total"                     db:"total"         bson:"total"`
 	Status        string      `json:"status"                    db:"status"        bson:"status"`
 	Pickup        bool        `json:"pickup"                    db:"pickup"        bson:"pickup"`

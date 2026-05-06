@@ -1,5 +1,7 @@
 package repomongo
 
+// menu.go — sub-DAO de menús para MongoDB.
+
 import (
 	"context"
 	"errors"

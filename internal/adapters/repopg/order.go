@@ -126,8 +126,6 @@ func fetchOrderItems(ctx context.Context, pool *pgxpool.Pool, orderID string) ([
 	if err != nil {
 		return nil, fmt.Errorf("collect order_items: %w", err)
 	}
-	if items == nil {
-		return []domain.OrderItem{}, nil
-	}
+	// pgx v5 CollectRows nunca retorna nil — retorna slice vacío si no hay filas.
 	return items, nil
 }

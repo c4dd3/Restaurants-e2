@@ -34,3 +34,5 @@ logs/
 # Volúmenes Docker locales
 .docker-volumes/
 data/
+
+go.sum

@@ -13,6 +13,7 @@ type Deps struct {
 	UserService        *service.UserService
 	RestaurantService  *service.RestaurantService
 	MenuService        *service.MenuService
+	ProductService     *service.ProductService
 	ReservationService *service.ReservationService
 	OrderService       *service.OrderService
 	JWTSecret          string
@@ -34,6 +35,7 @@ func NewRouter(deps Deps) *gin.Engine {
 	uh := NewUserHandler(deps.UserService)
 	rh := NewRestaurantHandler(deps.RestaurantService)
 	mh := NewMenuHandler(deps.MenuService)
+	ph := NewProductHandler(deps.ProductService)
 	resh := NewReservationHandler(deps.ReservationService)
 	oh := NewOrderHandler(deps.OrderService)
 
@@ -65,6 +67,12 @@ func NewRouter(deps Deps) *gin.Engine {
 		api.GET("/menus/:id", mh.GetByID)
 		api.PUT("/menus/:id", mh.Update)
 		api.DELETE("/menus/:id", mh.Delete)
+
+		// Productos — lectura abierta a cualquier usuario autenticado; escritura solo admin
+		api.GET("/products", ph.ListByCategory)
+		api.GET("/products/:id", ph.GetByID)
+		api.PATCH("/products/:id", ph.Update)
+		api.DELETE("/products/:id", ph.Delete)
 
 		// Reservas
 		api.POST("/reservations", resh.Create)

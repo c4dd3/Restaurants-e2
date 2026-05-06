@@ -16,6 +16,7 @@ import (
 const (
 	pgUniqueViolation    = "23505" // UNIQUE constraint violation
 	pgExclusionViolation = "23P01" // EXCLUDE USING gist violation (solapamiento de reservas)
+	pgInvalidTextRepr    = "22P02" // invalid_text_representation: valor no casteable al tipo de columna (e.g. "no-existe" en columna uuid)
 )
 
 var _ ports.UserRepository = (*UserRepoPg)(nil)
@@ -114,6 +115,10 @@ func pgErr(err error) error {
 		switch e.Code {
 		case pgUniqueViolation, pgExclusionViolation:
 			return domain.ErrConflict
+		case pgInvalidTextRepr:
+			// El valor no es casteable al tipo de la columna (e.g. string no-UUID en columna uuid).
+			// Se trata como "no encontrado" para no exponer detalles del schema al cliente.
+			return domain.ErrNotFound
 		}
 	}
 	return fmt.Errorf("db: %w", err)

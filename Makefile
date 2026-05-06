@@ -43,10 +43,10 @@ up: ## docker compose up con el perfil por defecto
 	$(COMPOSE) up --build -d
 
 up-postgres: ## Levanta stack con Postgres
-	$(COMPOSE) --profile postgres up --build -d
+	DB_ENGINE=postgres $(COMPOSE) --profile postgres up --build -d
 
 up-mongo: ## Levanta stack con Mongo (replica set + sharding)
-	$(COMPOSE) --profile mongo up --build -d
+	DB_ENGINE=mongo $(COMPOSE) --profile mongo up --build -d
 
 down: ## Apaga y elimina contenedores
 	$(COMPOSE) down
