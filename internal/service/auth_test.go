@@ -56,6 +56,38 @@ func TestAuthServiceRegisterRoleAlwaysClient(t *testing.T) {
 	}
 }
 
+func TestAuthServiceRegisterRoleExplicit(t *testing.T) {
+	// Cubre la rama donde req.Role es válido y se usa directamente.
+	tests := []struct {
+		role string
+	}{
+		{domain.RoleAdmin},
+		{domain.RoleClient},
+		{"invalido"}, // rol inválido → debe caer a "client"
+	}
+	for _, tc := range tests {
+		t.Run(tc.role, func(t *testing.T) {
+			svc := newAuthSvc(newMockUserRepo())
+			user, _, err := svc.Register(context.Background(), domain.RegisterRequest{
+				Name:     "Test User",
+				Email:    tc.role + "@example.com",
+				Password: "pass1234",
+				Role:     tc.role,
+			})
+			if err != nil {
+				t.Fatalf("Register inesperado: %v", err)
+			}
+			expected := tc.role
+			if tc.role != domain.RoleAdmin && tc.role != domain.RoleClient {
+				expected = domain.RoleClient
+			}
+			if user.Role != expected {
+				t.Errorf("rol esperado %q, obtenido %q", expected, user.Role)
+			}
+		})
+	}
+}
+
 func TestAuthServiceRegisterDuplicateEmail(t *testing.T) {
 	repo := newMockUserRepo()
 	svc := newAuthSvc(repo)
