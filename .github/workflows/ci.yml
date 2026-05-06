@@ -25,7 +25,7 @@ on:
 env:
   GO_VERSION: "1.23"
   REGISTRY: ghcr.io
-  IMAGE_NAMESPACE: ${{ github.repository_owner }}/restaurants-e2  # ghcr.io/<owner>/restaurants-e2
+  IMAGE_NAMESPACE: ${{ github.repository }}  # ghcr.io/<owner>/<repo>
 
 jobs:
 

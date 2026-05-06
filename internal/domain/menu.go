@@ -9,7 +9,7 @@ type Menu struct {
 	RestaurantID string    `json:"restaurant_id" db:"restaurant_id" bson:"restaurant_id"`
 	Name         string    `json:"name"          db:"name"          bson:"name"`
 	Description  string    `json:"description"   db:"description"   bson:"description"`
-	Products     []Product `json:"products,omitempty" bson:"products,omitempty"` // En Mongo se pueden embeber; en Postgres se cargan por join.
+	Products     []Product `json:"products,omitempty" db:"-" bson:"products,omitempty"` // db:"-": no es columna SQL; en Postgres se carga por join separado.
 	CreatedAt    time.Time `json:"created_at"    db:"created_at"    bson:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"    db:"updated_at"    bson:"updated_at"`
 }

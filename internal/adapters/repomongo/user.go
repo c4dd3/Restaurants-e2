@@ -22,7 +22,7 @@ func (r *UserRepoMongo) FindByID(ctx context.Context, id string) (*domain.User, 
 	var u domain.User
 	err := r.coll.FindOne(ctx, bson.M{"_id": id}).Decode(&u)
 	if errors.Is(err, mongo.ErrNoDocuments) {
-		return nil, nil
+		return nil, domain.ErrNotFound
 	}
 	if err != nil {
 		return nil, err
@@ -34,7 +34,7 @@ func (r *UserRepoMongo) FindByEmail(ctx context.Context, email string) (*domain.
 	var u domain.User
 	err := r.coll.FindOne(ctx, bson.M{"email": email}).Decode(&u)
 	if errors.Is(err, mongo.ErrNoDocuments) {
-		return nil, nil
+		return nil, domain.ErrNotFound
 	}
 	if err != nil {
 		return nil, err
@@ -72,7 +72,7 @@ func (r *UserRepoMongo) Update(ctx context.Context, id string, req *domain.Updat
 		options.FindOneAndUpdate().SetReturnDocument(options.After),
 	).Decode(&out)
 	if errors.Is(err, mongo.ErrNoDocuments) {
-		return nil, nil
+		return nil, domain.ErrNotFound
 	}
 	if err != nil {
 		return nil, err
@@ -81,6 +81,12 @@ func (r *UserRepoMongo) Update(ctx context.Context, id string, req *domain.Updat
 }
 
 func (r *UserRepoMongo) Delete(ctx context.Context, id string) error {
-	_, err := r.coll.DeleteOne(ctx, bson.M{"_id": id})
-	return err
+	res, err := r.coll.DeleteOne(ctx, bson.M{"_id": id})
+	if err != nil {
+		return err
+	}
+	if res.DeletedCount == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
 }

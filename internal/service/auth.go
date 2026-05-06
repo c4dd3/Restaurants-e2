@@ -43,12 +43,18 @@ func (s *AuthService) Register(ctx context.Context, req domain.RegisterRequest) 
 		return nil, "", err
 	}
 
+	// Usar el rol del request si es válido; en cualquier otro caso asignar "client".
+	role := domain.RoleClient
+	if req.Role == domain.RoleAdmin || req.Role == domain.RoleClient {
+		role = req.Role
+	}
+
 	u := &domain.User{
 		ID:       uuid.New().String(),
 		Name:     req.Name,
 		Email:    req.Email,
 		Password: hash,
-		Role:     req.Role,
+		Role:     role,
 	}
 
 	if err := s.users.Create(ctx, u); err != nil {

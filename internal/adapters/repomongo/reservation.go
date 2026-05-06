@@ -42,7 +42,7 @@ func (r *ReservationRepoMongo) FindByID(ctx context.Context, id string) (*domain
 	var res domain.Reservation
 	err := r.coll.FindOne(ctx, bson.M{"_id": id}).Decode(&res)
 	if errors.Is(err, mongo.ErrNoDocuments) {
-		return nil, nil
+		return nil, domain.ErrNotFound
 	}
 	if err != nil {
 		return nil, err
@@ -51,19 +51,26 @@ func (r *ReservationRepoMongo) FindByID(ctx context.Context, id string) (*domain
 }
 
 func (r *ReservationRepoMongo) Cancel(ctx context.Context, id string) error {
-	_, err := r.coll.UpdateOne(
+	res, err := r.coll.UpdateOne(
 		ctx,
 		bson.M{"_id": id, "status": bson.M{"$ne": domain.StatusCancelled}},
 		bson.M{"$set": bson.M{"status": domain.StatusCancelled}},
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	if res.MatchedCount == 0 {
+		// El id no existe O ya estaba cancelada — igual que el comportamiento de Postgres.
+		return domain.ErrNotFound
+	}
+	return nil
 }
 
 func (r *ReservationRepoMongo) CheckAvailability(ctx context.Context, restaurantID string, partySize int) (int, error) {
 	var rest domain.Restaurant
 	err := r.db.Collection("restaurants").FindOne(ctx, bson.M{"_id": restaurantID}).Decode(&rest)
 	if errors.Is(err, mongo.ErrNoDocuments) {
-		return 0, nil
+		return 0, domain.ErrNotFound
 	}
 	if err != nil {
 		return 0, err
