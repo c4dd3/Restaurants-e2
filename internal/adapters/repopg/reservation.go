@@ -99,7 +99,7 @@ func (r *ReservationRepoPg) CheckAvailability(ctx context.Context, restaurantID 
 		if errors.Is(err, pgx.ErrNoRows) {
 			return 0, domain.ErrNotFound
 		}
-		return 0, pgErr(err)
+		return 0, fmt.Errorf("query capacity: %w", err)
 	}
 
 	// 2. Asientos ya ocupados por reservas confirmadas en la ventana de 2 horas.

@@ -7,13 +7,11 @@ import "time"
 // no son específicos de HTTP ni de un motor de BD.
 
 // RegisterRequest — POST /auth/register
-// Role es opcional; si se omite o es inválido, se asigna "client" por defecto.
-// Valores válidos: "client" | "admin".
 type RegisterRequest struct {
 	Name     string `json:"name"     binding:"required,min=2"`
 	Email    string `json:"email"    binding:"required,email"`
 	Password string `json:"password" binding:"required,min=6"`
-	Role     string `json:"role"`
+	Role     string `json:"role"     binding:"required,oneof=client admin"`
 }
 
 // LoginRequest — POST /auth/login
