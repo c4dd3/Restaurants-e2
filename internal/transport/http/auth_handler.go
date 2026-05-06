@@ -21,8 +21,8 @@ func NewAuthHandler(svc *service.AuthService) *AuthHandler {
 
 // Register godoc
 // POST /auth/register
-// Body: { name, email, password }
-// Response 201: { token, user } — rol asignado automáticamente como "client"
+// Body: { name, email, password, role }
+// Response 201: { token, user }
 func (h *AuthHandler) Register(c *gin.Context) {
 	var req domain.RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

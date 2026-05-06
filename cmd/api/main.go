@@ -13,7 +13,6 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"restaurants-e2/internal/adapters/cacheredis"
-	"restaurants-e2/internal/adapters/repomongo"
 	"restaurants-e2/internal/adapters/repopg"
 	"restaurants-e2/internal/config"
 	"restaurants-e2/internal/ports"
@@ -49,7 +48,6 @@ func main() {
 	userSvc := service.NewUserService(repos.Users)
 	restaurantSvc := service.NewRestaurantService(repos.Restaurants, cache)
 	menuSvc := service.NewMenuService(repos.Menus, repos.Restaurants, repos.Products, cache)
-	productSvc := service.NewProductService(repos.Products, cache)
 	reservationSvc := service.NewReservationService(repos.Reservations, repos.Restaurants, cache)
 	orderSvc := service.NewOrderService(repos.Orders, repos.Products, repos.Restaurants)
 
@@ -59,7 +57,6 @@ func main() {
 		UserService:        userSvc,
 		RestaurantService:  restaurantSvc,
 		MenuService:        menuSvc,
-		ProductService:     productSvc,
 		ReservationService: reservationSvc,
 		OrderService:       orderSvc,
 		JWTSecret:          cfg.JWT.Secret,
@@ -88,18 +85,8 @@ func buildRepositories(ctx context.Context, cfg *config.Config) (*ports.Reposito
 		return repopg.NewRepositories(pool), pool.Close, nil
 
 	case config.EngineMongo:
-		client, err := repomongo.NewClient(ctx, cfg.Mongo)
-		if err != nil {
-			return nil, nil, err
-		}
-
-		repos := repomongo.NewRepositories(client, cfg.Mongo.DBName)
-
-		cleanup := func() {
-			_ = client.Disconnect(context.Background())
-		}
-
-		return repos, cleanup, nil
+		// La compañera implementa repomongo — cuando esté listo, instanciarlo aquí.
+		return nil, nil, errors.New("motor mongo aún no implementado")
 
 	default:
 		return nil, nil, fmt.Errorf("motor desconocido: %s", cfg.Engine)

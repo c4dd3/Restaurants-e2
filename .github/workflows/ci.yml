@@ -1,25 +1,25 @@
 # ============================================================================
 # CI/CD Pipeline — Restaurants-e2
 #
-# Trigger: push a main/dev, pull requests a main, y manualmente.
+# Trigger:
+#   - tests: lint + test (cobertura ≥ 90%)
+#   - dev:   lint + build de imágenes Docker
+#   - main:  lint + build + push a GHCR
 #
 # Jobs:
-#   1. lint:  go vet + staticcheck sobre todo el árbol.
-#   2. build: build de imágenes Docker para los 3 servicios.
-#   3. push:  publicar al Container Registry del repo (GHCR). Solo en push a main.
-#
-# NOTA: el job de tests quedó pospuesto a la fase final del proyecto.
-# Cuando se agregue, se reincorpora acá con un job `test` y se lo pone como
-# dependencia de `build`.
+#   1. lint:  go vet + staticcheck. Corre en todos los branches.
+#   2. test:  pruebas unitarias contra Postgres + MongoDB. Solo en branch tests.
+#   3. build: build de imágenes Docker. Solo en dev/main. Requiere lint.
+#   4. push:  publicar al GHCR. Solo en push a main.
 # ============================================================================
 
 name: CI
 
 on:
   push:
-    branches: [main, dev]
+    branches: [main, dev, tests]
   pull_request:
-    branches: [main]
+    branches: [main, dev]
   workflow_dispatch:
 
 env:
@@ -53,10 +53,76 @@ jobs:
           version: "latest"
           install-go: false
 
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    needs: lint
+    # Solo corre en el branch tests — dev y main no tienen archivos *_test.go
+    if: github.ref == 'refs/heads/tests'
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: restaurants
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 3s
+          --health-retries 5
+
+      mongodb:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ ping: 1 })'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Apply Postgres schema
+        run: |
+          PGPASSWORD=postgres psql -h localhost -U postgres -d restaurants \
+            -f deployments/postgres/init.sql
+
+      - name: Run tests
+        env:
+          POSTGRES_TEST_URL: postgres://postgres:postgres@localhost:5432/restaurants
+          MONGO_TEST_URI: mongodb://localhost:27017
+        run: |
+          go test ./internal/... \
+            -count=1 \
+            -coverprofile=coverage.out \
+            -covermode=atomic \
+            -timeout 120s
+
+      - name: Check coverage ≥ 90%
+        run: |
+          go tool cover -func=coverage.out | tail -1
+          COVERAGE=$(go tool cover -func=coverage.out | tail -1 | awk '{print $3}' | tr -d '%')
+          echo "Cobertura total: ${COVERAGE}%"
+          awk -v cov="$COVERAGE" 'BEGIN { if (cov+0 < 90) { print "ERROR: cobertura " cov "% es menor al 90% requerido"; exit 1 } }'
+
   build:
     name: Build Docker Images
     runs-on: ubuntu-latest
     needs: lint
+    # En dev y main no hay tests, así que build depende solo de lint
+    if: github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
     strategy:
       matrix:
         service: [api, auth, search]
