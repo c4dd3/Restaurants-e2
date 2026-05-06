@@ -136,15 +136,16 @@ func (r *ProductRepoPg) Delete(ctx context.Context, id string) error {
 func collectProducts(ctx context.Context, pool *pgxpool.Pool, q string, args ...any) ([]domain.Product, error) {
 	rows, err := pool.Query(ctx, q, args...)
 	if err != nil {
+		// 22P02: el valor no es casteable al tipo uuid (e.g. "no-uuid" en columna uuid).
+		// pool.Query falla en tiempo de ejecución antes de devolver filas — se trata
+		// como resultado vacío para que el service valide y retorne ErrValidation.
+		if errors.Is(pgErr(err), domain.ErrNotFound) {
+			return []domain.Product{}, nil
+		}
 		return nil, fmt.Errorf("query products: %w", err)
 	}
 	products, err := pgx.CollectRows(rows, pgx.RowToStructByName[domain.Product])
 	if err != nil {
-		// 22P02: el ID no es casteable al tipo uuid (e.g. "prod-no-existe").
-		// Se trata como resultado vacío para que el service pueda validar y retornar ErrValidation.
-		if errors.Is(pgErr(err), domain.ErrNotFound) {
-			return []domain.Product{}, nil
-		}
 		return nil, fmt.Errorf("collect products: %w", err)
 	}
 	// pgx v5 CollectRows nunca retorna nil — retorna slice vacío si no hay filas.

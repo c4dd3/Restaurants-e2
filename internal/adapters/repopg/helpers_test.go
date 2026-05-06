@@ -59,6 +59,16 @@ func TestPgErrUnknownPgCode(t *testing.T) {
 	}
 }
 
+// TestPgErrInvalidTextRepr cubre la rama 22P02 de pgErr:
+// valor no casteable al tipo de columna → domain.ErrNotFound.
+func TestPgErrInvalidTextRepr(t *testing.T) {
+	pgcErr := &pgconn.PgError{Code: "22P02"}
+	err := pgErr(pgcErr)
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("22P02 debería mapearse a ErrNotFound, obtuvo: %v", err)
+	}
+}
+
 // seedRestaurant crea un restaurante en la BD que depende de un admin existente.
 func seedRestaurant(t *testing.T, repo *RestaurantRepoPg, adminID string) *domain.Restaurant {
 	t.Helper()

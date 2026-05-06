@@ -222,6 +222,22 @@ func TestRepoPgCancelledContextErrors(t *testing.T) {
 	})
 }
 
+// TestProductFindByIDsInvalidUUID cubre la rama true de
+// `if errors.Is(pgErr(err), domain.ErrNotFound)` en collectProducts:
+// pasar un string no-UUID a una columna uuid provoca 22P02 en pool.Query,
+// que debe traducirse a slice vacío (no error) para que el service valide.
+func TestProductFindByIDsInvalidUUID(t *testing.T) {
+	pool := testPool(t) // se salta si Postgres no está disponible
+
+	products, err := NewProductRepoPg(pool).FindByIDs(context.Background(), []string{"not-a-uuid"})
+	if err != nil {
+		t.Fatalf("FindByIDs con ID no-UUID debería retornar slice vacío, obtuvo error: %v", err)
+	}
+	if len(products) != 0 {
+		t.Errorf("esperaba slice vacío, obtuvo %d productos", len(products))
+	}
+}
+
 // TestNewPoolInvalidDSNFormat cubre la rama `fmt.Errorf("parsear DSN: %w", err)`
 // de NewPool: pgxpool.ParseConfig falla cuando la URL tiene un formato inválido
 // (bracket abierto en el host → url.Parse retorna error).
