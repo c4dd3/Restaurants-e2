@@ -36,6 +36,29 @@ func TestRestaurantRepoMongoCreateFindAndList(t *testing.T) {
 	}
 }
 
+// TestRestaurantRepoMongoCreateAutoID cubre la rama `if rest.ID == ""` en Create:
+// cuando no se provee ID el repo genera uno automáticamente.
+func TestRestaurantRepoMongoCreateAutoID(t *testing.T) {
+	repos, cleanup := testMongoRepositories(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	r := &domain.Restaurant{
+		// ID no provisto → debe generarse automáticamente
+		Name:     "Auto ID Rest",
+		Address:  "Test",
+		Phone:    "0000-0000",
+		AdminID:  "admin-1",
+		Capacity: 10,
+	}
+	if err := repos.Restaurants.Create(ctx, r); err != nil {
+		t.Fatal(err)
+	}
+	if r.ID == "" {
+		t.Error("Create no generó ID automáticamente para restaurante")
+	}
+}
+
 // Revisa campos automáticos y el caso donde no se encuentra el restaurante.
 func TestRestaurantRepoMongoDefaultsAndMissing(t *testing.T) {
 	repos, cleanup := testMongoRepositories(t)

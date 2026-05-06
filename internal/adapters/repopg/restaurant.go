@@ -53,7 +53,7 @@ func (r *RestaurantRepoPg) FindByID(ctx context.Context, id string) (*domain.Res
 		return nil, domain.ErrNotFound
 	}
 	if err != nil {
-		return nil, fmt.Errorf("collect restaurant: %w", err)
+		return nil, pgErr(err)
 	}
 	return &rest, nil
 }

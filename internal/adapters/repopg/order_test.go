@@ -91,3 +91,49 @@ func TestOrderRepoPgFindByIDNotFound(t *testing.T) {
 		t.Errorf("esperado ErrNotFound, obtenido %v", err)
 	}
 }
+
+// TestOrderRepoPgCreateNoItems cubre la rama len(o.Items)==0 en order.go:
+// el bloque insertOrderItems se salta completamente y la orden se persiste sin items.
+func TestOrderRepoPgCreateNoItems(t *testing.T) {
+	pool := testPool(t)
+	userRepo := NewUserRepoPg(pool)
+	restRepo := NewRestaurantRepoPg(pool)
+	repo := NewOrderRepoPg(pool)
+	ctx := context.Background()
+
+	admin := seedAdminUser(t, userRepo)
+	rest := seedRestaurant(t, restRepo, admin.ID)
+	t.Cleanup(func() {
+		pool.Exec(ctx, "DELETE FROM orders WHERE restaurant_id=$1", rest.ID)     //nolint:errcheck
+		pool.Exec(ctx, "DELETE FROM restaurants WHERE id=$1", rest.ID)           //nolint:errcheck
+	})
+
+	o := &domain.Order{
+		ID:           uuid.NewString(),
+		UserID:       admin.ID,
+		RestaurantID: rest.ID,
+		Items:        []domain.OrderItem{}, // slice vacío — cubre el false-branch de len>0
+		Total:        0,
+		Status:       domain.StatusPending,
+		Pickup:       true,
+	}
+
+	if err := repo.Create(ctx, o); err != nil {
+		t.Fatalf("Create sin items: %v", err)
+	}
+	if o.CreatedAt.IsZero() {
+		t.Error("Create no llenó created_at")
+	}
+
+	// Verificar que la orden existe y no tiene items.
+	found, err := repo.FindByID(ctx, o.ID)
+	if err != nil {
+		t.Fatalf("FindByID después de Create: %v", err)
+	}
+	if len(found.Items) != 0 {
+		t.Errorf("esperados 0 items, obtenidos %d", len(found.Items))
+	}
+	if !found.Pickup {
+		t.Error("pickup debería ser true")
+	}
+}

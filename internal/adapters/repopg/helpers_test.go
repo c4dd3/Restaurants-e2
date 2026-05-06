@@ -5,9 +5,11 @@ package repopg
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"restaurants-e2/internal/domain"
 )
@@ -28,6 +30,33 @@ func seedAdminUser(t *testing.T, repo *UserRepoPg) *domain.User {
 	}
 	t.Cleanup(func() { _ = repo.Delete(ctx, u.ID) })
 	return u
+}
+
+// ── pgErr unit tests (sin BD) ─────────────────────────────────────────────────
+
+// TestPgErrNonPgError cubre la rama donde pgErr recibe un error que NO es
+// pgconn.PgError: el if errors.As(...) es false y se ejecuta el return fmt.Errorf.
+func TestPgErrNonPgError(t *testing.T) {
+	err := pgErr(errors.New("error genérico"))
+	if err == nil {
+		t.Fatal("pgErr debería retornar error")
+	}
+	if errors.Is(err, domain.ErrConflict) {
+		t.Fatal("error genérico no debería mapearse a ErrConflict")
+	}
+}
+
+// TestPgErrUnknownPgCode cubre la rama donde pgErr recibe un pgconn.PgError
+// con un código desconocido: el switch no tiene match y cae al return fmt.Errorf.
+func TestPgErrUnknownPgCode(t *testing.T) {
+	pgcErr := &pgconn.PgError{Code: "99999"} // código inexistente en el switch
+	err := pgErr(pgcErr)
+	if err == nil {
+		t.Fatal("pgErr debería retornar error para código desconocido")
+	}
+	if errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("código desconocido no debería mapearse a ErrConflict, obtuvo: %v", err)
+	}
 }
 
 // seedRestaurant crea un restaurante en la BD que depende de un admin existente.

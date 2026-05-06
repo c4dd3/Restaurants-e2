@@ -147,3 +147,41 @@ func TestOrderServiceGetByIDNotFound(t *testing.T) {
 		t.Errorf("esperado ErrNotFound, obtenido %v", err)
 	}
 }
+
+// ── Rutas de error en Create ──────────────────────────────────────────────────
+
+// TestOrderServiceCreateRestaurantUnexpectedError cubre la línea 44 de order.go:
+// restaurants.FindByID devuelve un error que NO es ErrNotFound → se propaga.
+func TestOrderServiceCreateRestaurantUnexpectedError(t *testing.T) {
+	rests := newMockRestaurantRepo()
+	rests.findByIDErr = errors.New("db connection lost")
+	svc := newOrderSvc(newMockOrderRepo(), newMockProductRepo(), rests)
+
+	_, err := svc.Create(context.Background(), "user-1", domain.CreateOrderRequest{
+		RestaurantID: "rest-1",
+		Items:        []domain.OrderItemRequest{{ProductID: "p-1", Quantity: 1}},
+	})
+	if err == nil || errors.Is(err, domain.ErrValidation) {
+		t.Errorf("esperado error inesperado propagado, obtenido %v", err)
+	}
+}
+
+// TestOrderServiceCreateFindByIDsError cubre la línea 54 de order.go:
+// products.FindByIDs devuelve error → se propaga.
+func TestOrderServiceCreateFindByIDsError(t *testing.T) {
+	rests := newMockRestaurantRepo()
+	rests.restaurants["rest-1"] = &domain.Restaurant{ID: "rest-1"}
+
+	prods := newMockProductRepo()
+	prods.findByIDsErr = errors.New("productos no disponibles")
+
+	svc := newOrderSvc(newMockOrderRepo(), prods, rests)
+
+	_, err := svc.Create(context.Background(), "user-1", domain.CreateOrderRequest{
+		RestaurantID: "rest-1",
+		Items:        []domain.OrderItemRequest{{ProductID: "p-1", Quantity: 1}},
+	})
+	if err == nil {
+		t.Error("esperado error de FindByIDs propagado, obtuvo nil")
+	}
+}

@@ -151,3 +151,26 @@ func TestNewProductRepository(t *testing.T) {
 		t.Fatal("Products repo no debería ser nil")
 	}
 }
+
+// TestProductRepoMongoValidationNoDB cubre las ramas de validación en product.go
+// que retornan ANTES de tocar MongoDB. No requiere conexión real — las estructuras
+// se crean directamente en el paquete (package repomongo).
+func TestProductRepoMongoValidationNoDB(t *testing.T) {
+	repo := &ProductRepoMongo{coll: nil} // coll nunca se alcanza en estas ramas
+	ctx := context.Background()
+
+	// Create con categoría vacía → error antes de InsertOne.
+	if err := repo.Create(ctx, &domain.Product{ID: "x", Name: "Test", Category: ""}); err == nil {
+		t.Error("Create: esperaba error por category vacía, obtuvo nil")
+	}
+
+	// Update con ID vacío → error antes de UpdateOne.
+	if err := repo.Update(ctx, &domain.Product{Name: "Test", Category: "cat"}); err == nil {
+		t.Error("Update: esperaba error por ID vacío, obtuvo nil")
+	}
+
+	// Update con categoría vacía → error antes de UpdateOne.
+	if err := repo.Update(ctx, &domain.Product{ID: "x", Name: "Test", Category: ""}); err == nil {
+		t.Error("Update: esperaba error por category vacía, obtuvo nil")
+	}
+}

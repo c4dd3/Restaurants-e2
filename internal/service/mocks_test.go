@@ -184,8 +184,9 @@ func (r *mockMenuRepo) Delete(ctx context.Context, id string) error {
 // ── mockProductRepo ───────────────────────────────────────────────────────────
 
 type mockProductRepo struct {
-	products        map[string]*domain.Product
+	products          map[string]*domain.Product
 	findByCategoryErr error // si no nil, FindByCategory devuelve este error
+	findByIDsErr      error // si no nil, FindByIDs devuelve este error
 }
 
 func newMockProductRepo() *mockProductRepo {
@@ -201,6 +202,9 @@ func (r *mockProductRepo) FindByID(ctx context.Context, id string) (*domain.Prod
 }
 
 func (r *mockProductRepo) FindByIDs(ctx context.Context, ids []string) ([]domain.Product, error) {
+	if r.findByIDsErr != nil {
+		return nil, r.findByIDsErr
+	}
 	out := []domain.Product{}
 	for _, id := range ids {
 		if p, ok := r.products[id]; ok {

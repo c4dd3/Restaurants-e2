@@ -127,3 +127,33 @@ func TestNewClientBadAddr(t *testing.T) {
 		t.Fatal("NewClient con dirección inválida debió retornar error")
 	}
 }
+
+// TestCacheGetUnmarshalError cubre la rama json.Unmarshal en Get:
+// cuando la clave existe pero el valor almacenado no es JSON válido para el tipo dest.
+func TestCacheGetUnmarshalError(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("no se pudo iniciar miniredis: %v", err)
+	}
+	t.Cleanup(mr.Close)
+
+	// Inyectamos JSON que no puede deserializarse en un struct tipado.
+	mr.Set("bad:json", "{json roto: sin comillas}")
+
+	client, err := NewClient(context.Background(), config.RedisConfig{Addr: mr.Addr()})
+	if err != nil {
+		t.Fatalf("no se pudo conectar: %v", err)
+	}
+	t.Cleanup(func() { client.Close() })
+
+	cache := New(client)
+
+	var dest struct{ X int }
+	err = cache.Get(context.Background(), "bad:json", &dest)
+	if err == nil {
+		t.Fatal("esperaba error de unmarshal, obtuvo nil")
+	}
+	if errors.As(err, &ports.ErrCacheMiss{}) {
+		t.Fatal("error de unmarshal no debe ser ErrCacheMiss")
+	}
+}

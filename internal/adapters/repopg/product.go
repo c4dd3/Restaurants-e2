@@ -140,6 +140,11 @@ func collectProducts(ctx context.Context, pool *pgxpool.Pool, q string, args ...
 	}
 	products, err := pgx.CollectRows(rows, pgx.RowToStructByName[domain.Product])
 	if err != nil {
+		// 22P02: el ID no es casteable al tipo uuid (e.g. "prod-no-existe").
+		// Se trata como resultado vacío para que el service pueda validar y retornar ErrValidation.
+		if errors.Is(pgErr(err), domain.ErrNotFound) {
+			return []domain.Product{}, nil
+		}
 		return nil, fmt.Errorf("collect products: %w", err)
 	}
 	// pgx v5 CollectRows nunca retorna nil — retorna slice vacío si no hay filas.

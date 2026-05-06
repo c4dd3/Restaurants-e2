@@ -83,6 +83,27 @@ func TestMenuRepoMongoCRUD(t *testing.T) {
 	}
 }
 
+// TestMenuRepoMongoCreateAutoID cubre la rama `if m.ID == ""` en Create:
+// cuando no se provee ID el repo genera uno automáticamente.
+func TestMenuRepoMongoCreateAutoID(t *testing.T) {
+	repos, cleanup := testMongoRepositories(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	m := &domain.Menu{
+		// ID no provisto → debe generarse automáticamente
+		RestaurantID: "rest-1",
+		Name:         "Auto ID Menu",
+		Description:  "test",
+	}
+	if err := repos.Menus.Create(ctx, m); err != nil {
+		t.Fatal(err)
+	}
+	if m.ID == "" {
+		t.Error("Create no generó ID automáticamente para menú")
+	}
+}
+
 func TestMenuRepoMongoUpdateProductsAndMissing(t *testing.T) {
 	repos, cleanup := testMongoRepositories(t)
 	defer cleanup()
