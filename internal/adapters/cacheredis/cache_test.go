@@ -118,6 +118,40 @@ func TestCacheDelByPatternNoMatches(t *testing.T) {
 	}
 }
 
+// TestCacheSetMarshalError cubre la rama json.Marshal en Set.
+func TestCacheSetMarshalError(t *testing.T) {
+	c := startMiniRedis(t)
+	err := c.Set(context.Background(), "key", make(chan int), time.Second)
+	if err == nil {
+		t.Fatal("esperaba error al serializar channel a JSON")
+	}
+}
+
+// TestCacheGetRedisError cubre la rama `return err` en Get (contexto cancelado → no es redis.Nil).
+func TestCacheGetRedisError(t *testing.T) {
+	c := startMiniRedis(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var dest string
+	err := c.Get(ctx, "any-key", &dest)
+	if err == nil {
+		t.Fatal("esperaba error por contexto cancelado")
+	}
+	if errors.As(err, &ports.ErrCacheMiss{}) {
+		t.Fatal("contexto cancelado no debe ser ErrCacheMiss")
+	}
+}
+
+// TestCacheDelByPatternScanError cubre la rama `return err` en DelByPattern (contexto cancelado).
+func TestCacheDelByPatternScanError(t *testing.T) {
+	c := startMiniRedis(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := c.DelByPattern(ctx, "pattern:*"); err == nil {
+		t.Fatal("esperaba error por contexto cancelado en Scan")
+	}
+}
+
 func TestNewClientBadAddr(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
