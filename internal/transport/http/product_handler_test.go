@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,7 +17,7 @@ import (
 func TestProductHandlerGetListUpdateDelete(t *testing.T) {
 	setupGin()
 	products := newMockProductRepo()
-	_ = products.Create(nil, &domain.Product{ID: "prod-1", RestaurantID: "rest-1", MenuID: "menu-1", Name: "Pizza", Category: "pizzas", Price: 4500, Available: true})
+	_ = products.Create(context.TODO(), &domain.Product{ID: "prod-1", RestaurantID: "rest-1", MenuID: "menu-1", Name: "Pizza", Category: "pizzas", Price: 4500, Available: true})
 	h := NewProductHandler(service.NewProductService(products, mockCache{}))
 	r := gin.New()
 	r.GET("/products", h.ListByCategory)
@@ -45,7 +46,7 @@ func TestProductHandlerErrors(t *testing.T) {
 	products := newMockProductRepo()
 
 	// Lo creo primero para que el PATCH sí llegue a validar el body.
-	_ = products.Create(nil, &domain.Product{
+	_ = products.Create(context.TODO(), &domain.Product{
 		ID:           "prod-1",
 		MenuID:       "menu-1",
 		RestaurantID: "rest-1",

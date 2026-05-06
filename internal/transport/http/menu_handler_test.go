@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -18,7 +19,7 @@ func TestMenuHandlerCreateGetUpdateDelete(t *testing.T) {
 	rests := newMockRestaurantRepo()
 	menus := newMockMenuRepo()
 	products := newMockProductRepo()
-	_ = rests.Create(nil, &domain.Restaurant{ID: "rest-1", Name: "Soda TEC", Capacity: 20})
+	_ = rests.Create(context.TODO(), &domain.Restaurant{ID: "rest-1", Name: "Soda TEC", Capacity: 20})
 	h := NewMenuHandler(service.NewMenuService(menus, rests, products, mockCache{}))
 	r := gin.New()
 	r.POST("/menus", func(c *gin.Context) { c.Set("role", domain.RoleAdmin); h.Create(c) })

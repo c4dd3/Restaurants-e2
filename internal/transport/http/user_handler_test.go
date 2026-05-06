@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,7 +17,7 @@ import (
 func TestUserHandlerGetMeUpdateDelete(t *testing.T) {
 	setupGin()
 	users := newMockUserRepo()
-	_ = users.Create(nil, &domain.User{ID: "user-1", Name: "Bea", Email: "bea@example.com", Role: domain.RoleClient})
+	_ = users.Create(context.TODO(), &domain.User{ID: "user-1", Name: "Bea", Email: "bea@example.com", Role: domain.RoleClient})
 	h := NewUserHandler(service.NewUserService(users))
 	r := gin.New()
 	r.GET("/users/me", func(c *gin.Context) { c.Set("user_id", "user-1"); h.GetMe(c) })

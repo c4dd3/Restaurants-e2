@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"testing"
@@ -17,8 +18,8 @@ func TestOrderHandlerCreateAndGet(t *testing.T) {
 	rests := newMockRestaurantRepo()
 	products := newMockProductRepo()
 	orders := newMockOrderRepo()
-	_ = rests.Create(nil, &domain.Restaurant{ID: "rest-1", Name: "Soda TEC", Capacity: 20})
-	_ = products.Create(nil, &domain.Product{ID: "prod-1", RestaurantID: "rest-1", Name: "Pizza", Category: "pizzas", Price: 4500, Available: true})
+	_ = rests.Create(context.TODO(), &domain.Restaurant{ID: "rest-1", Name: "Soda TEC", Capacity: 20})
+	_ = products.Create(context.TODO(), &domain.Product{ID: "prod-1", RestaurantID: "rest-1", Name: "Pizza", Category: "pizzas", Price: 4500, Available: true})
 	h := NewOrderHandler(service.NewOrderService(orders, products, rests))
 	r := gin.New()
 	r.POST("/orders", func(c *gin.Context) { c.Set("user_id", "user-1"); h.Create(c) })

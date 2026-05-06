@@ -17,7 +17,7 @@ func TestReservationHandlerCreateAndCancel(t *testing.T) {
 	setupGin()
 	rests := newMockRestaurantRepo()
 	reservations := newMockReservationRepo()
-	_ = rests.Create(nil, &domain.Restaurant{ID: "rest-1", Name: "Soda TEC", Capacity: 20})
+	_ = rests.Create(context.TODO(), &domain.Restaurant{ID: "rest-1", Name: "Soda TEC", Capacity: 20})
 	h := NewReservationHandler(service.NewReservationService(reservations, rests, mockCache{}))
 	r := gin.New()
 	r.POST("/reservations", func(c *gin.Context) { c.Set("user_id", "user-1"); h.Create(c) })
@@ -74,7 +74,7 @@ func TestReservationHandlerCancelForbidden(t *testing.T) {
 	setupGin()
 	rests := newMockRestaurantRepo()
 	reservations := newMockReservationRepo()
-	_ = rests.Create(nil, &domain.Restaurant{ID: "rest-1", Name: "Soda TEC", Capacity: 20})
+	_ = rests.Create(context.TODO(), &domain.Restaurant{ID: "rest-1", Name: "Soda TEC", Capacity: 20})
 
 	// Crear reserva para user-1
 	svc := service.NewReservationService(reservations, rests, mockCache{})
