@@ -1,47 +1,119 @@
 package repomongo
 
-// product.go — sub-DAO de productos para MongoDB.
-//
-// Struct:  type ProductRepoMongo struct { coll *mongo.Collection }
-// Verify:  var _ ports.ProductRepository = (*ProductRepoMongo)(nil)
-//
-// Colección: products
-// Sharding: SÍ — shard key "category" (hashed).
-//   Configurado en deployments/mongo/init-cluster.sh:
-//     sh.shardCollection("restaurants.products", { category: "hashed" })
-//
-// Implicancias del sharding:
-//   - Escrituras distribuidas: productos de categorías distintas caen en
-//     shards distintos → paralelismo de inserción.
-//   - FindByCategory: el mongos sabe a qué shard ir (targeted query).
-//   - FindByID: el mongos NO sabe qué shard tiene el id → broadcast a todos.
-//     Mitigación: incluir category en el filter si se conoce; si no, aceptar
-//     el broadcast (aceptable en Etapa 2 — no es hot path).
-//   - Cada INSERT DEBE incluir el campo category (shard key obligatoria).
-//
-// Métodos:
-//
-// FindByID(ctx, id) (*domain.Product, error)
-//   FindOne({_id: id}). Si no existe → nil, nil.
-//
-// FindByCategory(ctx, category) ([]domain.Product, error)
-//   filter := bson.M{"category": category}
-//   Find + cur.All.
-//   Targeted: va al shard que contiene ese hash de category.
-//
-// FindAll(ctx) ([]domain.Product, error)
-//   filter := bson.M{}
-//   ⚠ Broadcast a todos los shards — evitar sin paginación.
-//
-// Create(ctx, p) error
-//   Validar p.Category != "" (shard key obligatoria).
-//   InsertOne.
-//
-// Update(ctx, p) error
-//   ⚠ En Mongo sharded, NO se puede cambiar el valor de la shard key.
-//   Si el service necesita cambiar la categoría, debe DeleteOne + InsertOne
-//   (o devolver error). Para Etapa 2: disallow en el service y devolver ErrValidation.
-//
-// Delete(ctx, id) error
-//   Si se conoce la category → incluirla: DeleteOne({_id: id, category: cat}).
-//   Si no → DeleteOne({_id: id}) con broadcast. Aceptable.
+import (
+	"context"
+	"errors"
+
+	"github.com/google/uuid"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+
+	"restaurants-e2/internal/domain"
+	"restaurants-e2/internal/ports"
+)
+
+type ProductRepoMongo struct {
+	coll *mongo.Collection
+}
+
+var _ ports.ProductRepository = (*ProductRepoMongo)(nil)
+
+func NewProductRepository(coll *mongo.Collection) *ProductRepoMongo {
+	return &ProductRepoMongo{coll: coll}
+}
+
+func (r *ProductRepoMongo) FindByID(ctx context.Context, id string) (*domain.Product, error) {
+	var product domain.Product
+	err := r.coll.FindOne(ctx, bson.M{"_id": id}).Decode(&product)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &product, nil
+}
+
+func (r *ProductRepoMongo) FindByIDs(ctx context.Context, ids []string) ([]domain.Product, error) {
+	if len(ids) == 0 {
+		return []domain.Product{}, nil
+	}
+	cur, err := r.coll.Find(ctx, bson.M{"_id": bson.M{"$in": ids}})
+	if err != nil {
+		return nil, err
+	}
+	defer cur.Close(ctx)
+
+	var products []domain.Product
+	if err := cur.All(ctx, &products); err != nil {
+		return nil, err
+	}
+	return products, nil
+}
+
+func (r *ProductRepoMongo) FindByCategory(ctx context.Context, category string) ([]domain.Product, error) {
+	cur, err := r.coll.Find(ctx, bson.M{"category": category})
+	if err != nil {
+		return nil, err
+	}
+	defer cur.Close(ctx)
+
+	var products []domain.Product
+	if err := cur.All(ctx, &products); err != nil {
+		return nil, err
+	}
+	return products, nil
+}
+
+func (r *ProductRepoMongo) FindAll(ctx context.Context) ([]domain.Product, error) {
+	cur, err := r.coll.Find(ctx, bson.M{})
+	if err != nil {
+		return nil, err
+	}
+	defer cur.Close(ctx)
+
+	var products []domain.Product
+	if err := cur.All(ctx, &products); err != nil {
+		return nil, err
+	}
+	return products, nil
+}
+
+func (r *ProductRepoMongo) Create(ctx context.Context, p *domain.Product) error {
+	if p.ID == "" {
+		p.ID = uuid.NewString()
+	}
+	if p.Category == "" {
+		return errors.New("category es obligatoria para productos en MongoDB")
+	}
+	_, err := r.coll.InsertOne(ctx, p)
+	return err
+}
+
+func (r *ProductRepoMongo) Update(ctx context.Context, p *domain.Product) error {
+	if p.ID == "" {
+		return errors.New("id es obligatorio para actualizar producto")
+	}
+	if p.Category == "" {
+		return errors.New("category es obligatoria para productos en MongoDB")
+	}
+
+	update := bson.M{
+		"$set": bson.M{
+			"menu_id":       p.MenuID,
+			"restaurant_id": p.RestaurantID,
+			"name":          p.Name,
+			"description":   p.Description,
+			"category":      p.Category,
+			"price":         p.Price,
+			"available":     p.Available,
+		},
+	}
+	_, err := r.coll.UpdateOne(ctx, bson.M{"_id": p.ID}, update)
+	return err
+}
+
+func (r *ProductRepoMongo) Delete(ctx context.Context, id string) error {
+	_, err := r.coll.DeleteOne(ctx, bson.M{"_id": id})
+	return err
+}

@@ -1,50 +1,50 @@
 package repomongo
 
-// order.go — sub-DAO de órdenes para MongoDB.
-//
-// Struct:  type OrderRepoMongo struct { coll *mongo.Collection }
-// Verify:  var _ ports.OrderRepository = (*OrderRepoMongo)(nil)
-//
-// Colección: orders (NO sharded en Etapa 2 — se podría shardear por
-// restaurant_id o user_id si escala lo requiere).
-//
-// Modelado — decisión:
-//   Embebemos `items` DENTRO del documento order. En Mongo esto es idiomático
-//   para 1:N pequeño (una orden tiene pocos items, se leen juntos siempre).
-//
-//   Documento típico:
-//     {
-//       "_id": "uuid",
-//       "user_id": "...",
-//       "restaurant_id": "...",
-//       "reservation_id": null | "...",
-//       "items": [
-//         { "product_id": "...", "quantity": 2, "unit_price": 8.5 },
-//         ...
-//       ],
-//       "total": 17.0,
-//       "pickup": true,
-//       "status": "pending",
-//       "created_at": ...,
-//       "updated_at": ...
-//     }
-//
-// Ventaja sobre Postgres:
-//   - Sin transacción — una sola InsertOne es atómica por documento.
-//   - Lectura con 1 query.
-//
-// Métodos:
-//
-// Create(ctx, o) error
-//   Generar uuid.
-//   r.coll.InsertOne(ctx, o)
-//   ⚠ Atomicidad garantizada a nivel de documento único.
-//
-// FindByID(ctx, id) (*domain.Order, error)
-//   FindOne({_id: id}). El documento ya trae `items` embebidos.
-//
-// Observación de diseño:
-//   Esta asimetría (embeber en Mongo, tabla separada en pg) es deliberada —
-//   cada motor se usa con su estilo idiomático, mientras el port sigue siendo
-//   el mismo. Los structs de dominio tienen los tags db (para pg) y bson (para mongo)
-//   bien puestos, así el mismo struct sirve para ambos.
+import (
+	"context"
+	"errors"
+	"time"
+
+	"github.com/google/uuid"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+
+	"restaurants-e2/internal/domain"
+	"restaurants-e2/internal/ports"
+)
+
+type OrderRepoMongo struct{ coll *mongo.Collection }
+
+var _ ports.OrderRepository = (*OrderRepoMongo)(nil)
+
+func (r *OrderRepoMongo) Create(ctx context.Context, o *domain.Order) error {
+	if o.ID == "" {
+		o.ID = uuid.NewString()
+	}
+	if o.Status == "" {
+		o.Status = domain.StatusPending
+	}
+	if o.CreatedAt.IsZero() {
+		o.CreatedAt = time.Now().UTC()
+	}
+	for i := range o.Items {
+		if o.Items[i].ID == "" {
+			o.Items[i].ID = uuid.NewString()
+		}
+		o.Items[i].OrderID = o.ID
+	}
+	_, err := r.coll.InsertOne(ctx, o)
+	return err
+}
+
+func (r *OrderRepoMongo) FindByID(ctx context.Context, id string) (*domain.Order, error) {
+	var out domain.Order
+	err := r.coll.FindOne(ctx, bson.M{"_id": id}).Decode(&out)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}

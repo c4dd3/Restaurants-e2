@@ -1,49 +1,86 @@
 package repomongo
 
-// user.go — sub-DAO de usuarios para MongoDB.
-//
-// Struct:  type UserRepoMongo struct { coll *mongo.Collection }
-// Verify:  var _ ports.UserRepository = (*UserRepoMongo)(nil)
-//
-// Colección: users
-// Índice recomendado (crearlo en init-cluster.sh o en boot del adapter):
-//   db.users.createIndex({ email: 1 }, { unique: true })
-//
-// Estrategia de ID:
-//   Usamos el mismo string UUID que Postgres en el campo _id. Esto mantiene
-//   la simetría: mismo ID en ambos motores. Los structs de dominio tienen
-//   tag `bson:"_id,omitempty"` en el campo ID.
-//
-// Métodos:
-//
-// FindByID(ctx, id) (*domain.User, error)
-//   filter := bson.M{"_id": id}
-//   err := r.coll.FindOne(ctx, filter).Decode(&u)
-//   if errors.Is(err, mongo.ErrNoDocuments) → return nil, nil
-//
-// FindByEmail(ctx, email) (*domain.User, error)
-//   filter := bson.M{"email": email}
-//   FindOne + Decode.
-//
-// Create(ctx, u) error
-//   Si u.ID == "" → generar uuid.
-//   _, err := r.coll.InsertOne(ctx, u)
-//   Si mongo.WriteException con code 11000 (duplicate key) → error envuelto;
-//   el service lo traduce a ErrConflict.
-//
-// Update(ctx, id, req) (*domain.User, error)
-//   update := bson.M{"$set": bson.M{}}
-//   Solo incluir campos no vacíos:
-//     if req.Name != ""  → update["$set"].(bson.M)["name"] = req.Name
-//     if req.Email != "" → update["$set"].(bson.M)["email"] = req.Email
-//     update["$set"].(bson.M)["updated_at"] = time.Now()
-//   r.coll.FindOneAndUpdate(ctx, filter, update,
-//       options.FindOneAndUpdate().SetReturnDocument(options.After)).Decode(&u)
-//
-// Delete(ctx, id) error
-//   res, err := r.coll.DeleteOne(ctx, bson.M{"_id": id})
-//   if res.DeletedCount == 0 → devolver nil o ErrNotFound según criterio.
-//
-// Observación:
-//   La colección users NO se shardea (poca cardinalidad, muchas lecturas por email).
-//   Solo products y reservations están sharded.
+import (
+	"context"
+	"errors"
+	"time"
+
+	"github.com/google/uuid"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
+
+	"restaurants-e2/internal/domain"
+	"restaurants-e2/internal/ports"
+)
+
+type UserRepoMongo struct{ coll *mongo.Collection }
+
+var _ ports.UserRepository = (*UserRepoMongo)(nil)
+
+func (r *UserRepoMongo) FindByID(ctx context.Context, id string) (*domain.User, error) {
+	var u domain.User
+	err := r.coll.FindOne(ctx, bson.M{"_id": id}).Decode(&u)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &u, nil
+}
+
+func (r *UserRepoMongo) FindByEmail(ctx context.Context, email string) (*domain.User, error) {
+	var u domain.User
+	err := r.coll.FindOne(ctx, bson.M{"email": email}).Decode(&u)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &u, nil
+}
+
+func (r *UserRepoMongo) Create(ctx context.Context, u *domain.User) error {
+	now := time.Now().UTC()
+	if u.ID == "" {
+		u.ID = uuid.NewString()
+	}
+	if u.CreatedAt.IsZero() {
+		u.CreatedAt = now
+	}
+	u.UpdatedAt = now
+	_, err := r.coll.InsertOne(ctx, u)
+	return err
+}
+
+func (r *UserRepoMongo) Update(ctx context.Context, id string, req *domain.UpdateUserRequest) (*domain.User, error) {
+	set := bson.M{"updated_at": time.Now().UTC()}
+	if req.Name != "" {
+		set["name"] = req.Name
+	}
+	if req.Email != "" {
+		set["email"] = req.Email
+	}
+
+	var out domain.User
+	err := r.coll.FindOneAndUpdate(
+		ctx,
+		bson.M{"_id": id},
+		bson.M{"$set": set},
+		options.FindOneAndUpdate().SetReturnDocument(options.After),
+	).Decode(&out)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (r *UserRepoMongo) Delete(ctx context.Context, id string) error {
+	_, err := r.coll.DeleteOne(ctx, bson.M{"_id": id})
+	return err
+}
