@@ -99,30 +99,21 @@ jobs:
           PGPASSWORD=postgres psql -h localhost -U postgres -d restaurants \
             -f deployments/postgres/init.sql
 
-      - name: Run tests (Postgres)
+      - name: Run tests
         env:
           POSTGRES_TEST_URL: postgres://postgres:postgres@localhost:5432/restaurants
-        run: |
-          go test ./internal/... \
-            -count=1 \
-            -coverprofile=coverage-pg.out \
-            -covermode=atomic \
-            -timeout 120s
-
-      - name: Run tests (MongoDB)
-        env:
           MONGO_TEST_URI: mongodb://localhost:27017
         run: |
           go test ./internal/... \
             -count=1 \
-            -coverprofile=coverage-mongo.out \
+            -coverprofile=coverage.out \
             -covermode=atomic \
             -timeout 120s
 
       - name: Check coverage ≥ 90%
         run: |
-          go tool cover -func=coverage-pg.out | tail -1
-          COVERAGE=$(go tool cover -func=coverage-pg.out | tail -1 | awk '{print $3}' | tr -d '%')
+          go tool cover -func=coverage.out | tail -1
+          COVERAGE=$(go tool cover -func=coverage.out | tail -1 | awk '{print $3}' | tr -d '%')
           echo "Cobertura total: ${COVERAGE}%"
           awk -v cov="$COVERAGE" 'BEGIN { if (cov+0 < 90) { print "ERROR: cobertura " cov "% es menor al 90% requerido"; exit 1 } }'
 
