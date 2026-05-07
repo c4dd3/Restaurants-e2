@@ -10,8 +10,10 @@
 #   docker compose -f deployments/docker-compose.yml --profile mongo    up --build
 #
 # Escalamiento horizontal:
-#   docker compose ... up --scale api=3 --scale search=2
-#   Nginx las descubre vía DNS de Docker (resolver 127.0.0.11).
+#   Editar deploy.replicas en cada servicio (api, auth, search) y hacer up.
+#   También se puede sobreescribir en CLI: --scale api=3 --scale search=2
+#   Nginx descubre réplicas vía DNS de Docker (resolver 127.0.0.11) y
+#   redirige automáticamente si un contenedor muere (proxy_next_upstream).
 # ============================================================================
 
 services:
@@ -43,15 +45,18 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile.api
-    # Sin container_name: permite escalar con docker compose --scale api=N.
+    # Sin container_name: requerido para que deploy.replicas funcione.
     env_file: ../.env
     environment:
       API_PORT: 8080
-      DB_ENGINE: ${DB_ENGINE}
-      POSTGRES_HOST: postgres   # dentro de Docker el host es el nombre del servicio, no localhost
+      POSTGRES_HOST: postgres
     depends_on:
       redis:
         condition: service_started
+      mongos:
+        condition: service_healthy
+      mongo_init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
       interval: 10s
@@ -60,6 +65,10 @@ services:
       start_period: 10s
     networks: [re2_net]
     restart: unless-stopped
+    deploy:
+      replicas: 2          # Cambiar aquí para escalar sin tocar el CLI.
+      restart_policy:
+        condition: on-failure
 
   auth:
     build:
@@ -68,8 +77,12 @@ services:
     env_file: ../.env
     environment:
       AUTH_PORT: 8081
-      DB_ENGINE: ${DB_ENGINE}
       POSTGRES_HOST: postgres
+    depends_on:
+      mongos:
+        condition: service_healthy
+      mongo_init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8081/health"]
       interval: 10s
@@ -78,6 +91,10 @@ services:
       start_period: 30s
     networks: [re2_net]
     restart: unless-stopped
+    deploy:
+      replicas: 2
+      restart_policy:
+        condition: on-failure
 
   search:
     build:
@@ -86,11 +103,14 @@ services:
     env_file: ../.env
     environment:
       SEARCH_PORT: 8082
-      DB_ENGINE: ${DB_ENGINE}
       POSTGRES_HOST: postgres
     depends_on:
       elasticsearch:
         condition: service_healthy
+      mongos:
+        condition: service_healthy
+      mongo_init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8082/health"]
       interval: 10s
@@ -99,6 +119,10 @@ services:
       start_period: 15s
     networks: [re2_net]
     restart: unless-stopped
+    deploy:
+      replicas: 2
+      restart_policy:
+        condition: on-failure
 
   # ----------------------------------------------------------------------
   #  Postgres (modo single-node — suficiente para desarrollo)
@@ -213,6 +237,12 @@ services:
       - mongo_shard2_a
     ports:
       - "27017:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--host", "localhost:27017", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
     networks: [re2_net]
 
   # Init one-shot container: inicializa replica sets + agrega shards + define shard keys.
