@@ -91,15 +91,13 @@ cp .env.example .env
 ### 2. Modo Postgres (por defecto)
 
 ```bash
-make up-postgres
-# o: docker compose -f deployments/docker-compose.yml --profile postgres up --build -d
+DB_ENGINE=postgres docker compose -f deployments/docker-compose.yml --profile postgres up --build -d
 ```
 
 ### 3. Modo MongoDB (con replica set + sharding)
 
 ```bash
-make up-mongo
-# o: DB_ENGINE=mongo docker compose -f deployments/docker-compose.yml --profile mongo up --build -d
+DB_ENGINE=mongo docker compose -f deployments/docker-compose.yml --profile mongo up --build -d
 ```
 
 El contenedor `mongo_init` inicializa automáticamente el cluster al levantar:
@@ -120,30 +118,56 @@ docker exec -it re2_mongos mongosh --eval 'sh.status()'
 ### 4. Cambio de motor sin recompilar
 
 ```bash
-# Editar .env → DB_ENGINE=mongo (o postgres)
-docker compose -f deployments/docker-compose.yml restart api auth search
+# Bajar el stack y levantarlo con el otro motor
+docker compose -f deployments/docker-compose.yml --profile postgres down
+DB_ENGINE=mongo docker compose -f deployments/docker-compose.yml --profile mongo up --build -d
 # No se cambia una sola línea de Go.
 ```
 
 ### 5. Verificar que todo responde
 
 ```bash
-make health
-# Chequea /health de nginx, api, auth y search en un solo comando
+curl -s http://localhost/healthz
+curl -s http://localhost/api/health
+curl -s http://localhost/auth/health
+curl -s http://localhost/search/health
 ```
 
 ### 6. Escalar horizontalmente
 
-Los servicios `api`, `auth` y `search` están configurados con `deploy.replicas: 2` por defecto. Para cambiar el número de réplicas en caliente:
+Los servicios `api`, `auth` y `search` se pueden escalar de forma independiente. Para levantar el stack con un número de réplicas específico desde el inicio:
 
 ```bash
-make scale-api N=3     # escala api a 3 réplicas
-make scale-search N=2  # escala search a 2 réplicas
+# Postgres — réplicas iguales
+DB_ENGINE=postgres docker compose -f deployments/docker-compose.yml --profile postgres up --build -d \
+  --scale api=3 --scale auth=3 --scale search=3
+
+# Postgres — réplicas por separado
+DB_ENGINE=postgres docker compose -f deployments/docker-compose.yml --profile postgres up --build -d \
+  --scale api=3 --scale auth=2 --scale search=2
+
+# Mongo — mismo esquema
+DB_ENGINE=mongo docker compose -f deployments/docker-compose.yml --profile mongo up --build -d \
+  --scale api=3 --scale auth=2 --scale search=2
 ```
 
-Nginx descubre las nuevas instancias automáticamente vía el resolver DNS interno de Docker (`127.0.0.11`, re-resolución cada 5 s). Si una instancia muere, `proxy_next_upstream` reintenta la request en otra instancia viva — el cliente no percibe el error.
+Para cambiar réplicas en caliente sin bajar el stack:
 
-Para demostrar el balanceo y el failover:
+```bash
+# Escala api a 5 sin tocar auth ni search
+docker compose -f deployments/docker-compose.yml --profile postgres up -d --scale api=5 --no-recreate
+```
+
+Si una instancia muere o se mata manualmente, para volver al número deseado:
+
+```bash
+# Compose levanta las que faltan para llegar a 3, sin tocar las vivas
+docker compose -f deployments/docker-compose.yml --profile postgres up -d --scale api=3 --no-recreate
+```
+
+Nginx descubre las instancias automáticamente vía el resolver DNS interno de Docker (`127.0.0.11`, re-resolución cada 5 s). Si una instancia muere mid-request, `proxy_next_upstream` reintenta en otra instancia viva sin que el cliente perciba el error.
+
+Para verificar el balanceo y el failover:
 
 ```bash
 # Ver a qué instancia va cada request
