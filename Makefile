@@ -35,7 +35,10 @@ build: ## Compila los 3 binarios en ./bin/
 	go build -o bin/auth   ./cmd/auth
 	go build -o bin/search ./cmd/search
 
-# Tests: pospuestos a fase final del proyecto (ver README).
+.PHONY: test
+test: ## Corre tests unitarios e integración (requiere POSTGRES_TEST_URL y MONGO_TEST_URI)
+	go test ./internal/... -count=1 -coverprofile=coverage.out -timeout 120s
+	go tool cover -func=coverage.out | tail -1
 
 # ---------- Docker / Compose ----------
 .PHONY: up up-postgres up-mongo down logs ps
