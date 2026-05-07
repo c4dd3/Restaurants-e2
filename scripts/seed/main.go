@@ -38,15 +38,17 @@ func main() {
 	}
 
 	apiKey := os.Getenv("ANTHROPIC_API_KEY")
+	var llm LLMClient
 	if apiKey == "" {
-		log.Fatal("[seed] ANTHROPIC_API_KEY es requerida")
+		log.Printf("[seed] ANTHROPIC_API_KEY no configurada — usando datos estáticos realistas")
+		llm = &StaticClient{}
+	} else {
+		model := os.Getenv("SEED_LLM_MODEL")
+		if model == "" {
+			model = "claude-haiku-4-5-20251001"
+		}
+		llm = NewAnthropicClient(apiKey, model)
 	}
-	model := os.Getenv("SEED_LLM_MODEL")
-	if model == "" {
-		model = "claude-haiku-4-5-20251001"
-	}
-
-	llm := NewAnthropicClient(apiKey, model)
 	ctx := context.Background()
 
 	// ── Repositorios ────────────────────────────────────────────────────────
