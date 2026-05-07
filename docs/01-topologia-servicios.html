@@ -87,8 +87,8 @@ flowchart LR
   AUTH -->|repos| PG
   API  -->|repos| PG
   API  -->|cache| RD
-  SEARCH -->|read/index| ES
-  API  -.indexa productos.-> ES
+  SEARCH -->|read repos| PG
+  SEARCH -->|index/query| ES
 
   classDef svc fill:#dbeafe,stroke:#2563eb,color:#1e3a8a
   classDef pkg fill:#d1fae5,stroke:#059669,color:#064e3b
@@ -114,7 +114,7 @@ flowchart LR
       <li><b>Mismo secret JWT</b> en los 3 servicios (<code>JWT_SECRET</code>): auth lo firma, api y search lo verifican. Stateless → ninguno comparte sesión.</li>
       <li><b><code>internal/auth</code></b> elimina la duplicación de lógica de tokens/bcrypt entre <code>cmd/auth</code> y el middleware de <code>cmd/api</code>.</li>
       <li><b><code>internal/wiring</code></b> centraliza la decisión de motor. <code>cmd/search</code> NO lo usa: ElasticSearch es su única fuente.</li>
-      <li><b>Indexación a ES</b>: escribe <code>cmd/api</code> (como side-effect del service al crear/actualizar producto). Lee <code>cmd/search</code>. Patrón CQRS-lite.</li>
+      <li><b>Indexación a ES</b>: <code>cmd/search</code> lee productos del repositorio principal (Postgres o Mongo) y los escribe en ElasticSearch. El <code>cmd/api</code> no toca ES directamente. La reindexación se dispara vía <code>POST /search/reindex</code>.</li>
     </ul>
   </div>
 </main>
