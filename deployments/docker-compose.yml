@@ -53,10 +53,6 @@ services:
     depends_on:
       redis:
         condition: service_started
-      mongos:
-        condition: service_healthy
-      mongo_init:
-        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
       interval: 10s
@@ -78,11 +74,6 @@ services:
     environment:
       AUTH_PORT: 8081
       POSTGRES_HOST: postgres
-    depends_on:
-      mongos:
-        condition: service_healthy
-      mongo_init:
-        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8081/health"]
       interval: 10s
@@ -107,10 +98,6 @@ services:
     depends_on:
       elasticsearch:
         condition: service_healthy
-      mongos:
-        condition: service_healthy
-      mongo_init:
-        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8082/health"]
       interval: 10s
