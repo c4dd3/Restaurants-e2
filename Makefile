@@ -64,12 +64,18 @@ ps: ## Estado de los servicios
 	$(COMPOSE) ps
 
 # ---------- Escalado ----------
-N ?= 2
-.PHONY: scale-api scale-search
-scale-api:    ## Escala api a N réplicas (make scale-api N=3)
-	$(COMPOSE) up -d --scale api=$(N) --no-recreate
-scale-search: ## Escala search a N réplicas
-	$(COMPOSE) up -d --scale search=$(N) --no-recreate
+# Uso: make scale-api N=3   make scale-auth N=2   make scale-search N=4
+# PROFILE: postgres (default) | mongo
+N       ?= 2
+PROFILE ?= postgres
+
+.PHONY: scale-api scale-auth scale-search
+scale-api:    ## Escala api a N réplicas    (make scale-api N=3 [PROFILE=mongo])
+	$(COMPOSE) --profile $(PROFILE) up -d --scale api=$(N) --no-recreate
+scale-auth:   ## Escala auth a N réplicas   (make scale-auth N=2 [PROFILE=mongo])
+	$(COMPOSE) --profile $(PROFILE) up -d --scale auth=$(N) --no-recreate
+scale-search: ## Escala search a N réplicas (make scale-search N=4 [PROFILE=mongo])
+	$(COMPOSE) --profile $(PROFILE) up -d --scale search=$(N) --no-recreate
 
 # ---------- Utilidades ----------
 .PHONY: seed health
