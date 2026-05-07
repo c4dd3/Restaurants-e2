@@ -55,14 +55,11 @@ jobs:
           install-go: false
 
   test:
-    name: Tests (${{ matrix.db }})
+    name: Unit Tests
     runs-on: ubuntu-latest
     needs: lint
+    # Solo corre en el branch tests — dev y main no tienen archivos *_test.go
     if: github.ref == 'refs/heads/tests'
-    strategy:
-      fail-fast: false   # si falla postgres, mongo sigue corriendo igual
-      matrix:
-        db: [postgres, mongo]
 
     services:
       postgres:
@@ -99,28 +96,12 @@ jobs:
           cache: true
 
       - name: Apply Postgres schema
-        if: matrix.db == 'postgres'
         run: |
           PGPASSWORD=postgres psql -h localhost -U postgres -d restaurants \
             -f deployments/postgres/init.sql
 
-      - name: Run tests (Postgres)
-        if: matrix.db == 'postgres'
+      - name: Run tests
         env:
-          DB_ENGINE: postgres
-          POSTGRES_TEST_URL: postgres://postgres:postgres@localhost:5432/restaurants
-          MONGO_TEST_URI: mongodb://localhost:27017
-        run: |
-          go test ./internal/... \
-            -count=1 \
-            -coverprofile=coverage.out \
-            -covermode=atomic \
-            -timeout 120s
-
-      - name: Run tests (Mongo)
-        if: matrix.db == 'mongo'
-        env:
-          DB_ENGINE: mongo
           POSTGRES_TEST_URL: postgres://postgres:postgres@localhost:5432/restaurants
           MONGO_TEST_URI: mongodb://localhost:27017
         run: |
