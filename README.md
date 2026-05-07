@@ -178,7 +178,7 @@ docker kill deployments-api-1
 for i in $(seq 1 5); do curl -s -o /dev/null -w "HTTP %{http_code}\n" http://localhost/api/restaurants; done
 ```
 
-> **Nota sobre Kubernetes**: el enunciado menciona Kubernetes como opción de escalado horizontal. Se optó por Docker Compose con `deploy.replicas` dado que el despliegue final es en entorno local, lo que evita la sobrecarga operativa de K8s sin sacrificar la demostración del concepto. En producción, los mismos Dockerfiles se desplegarían como Deployments de Kubernetes sin modificar el código de la aplicación.
+> **Nota sobre Kubernetes**: No se utiliza Kubernetes como opción de escalado horizontal. Se optó por Docker Compose con `deploy.replicas` dado que el despliegue final es en entorno local, lo que evita la sobrecarga operativa sin sacrificar la demostración del concepto. En producción, los mismos Dockerfiles se desplegarían como Deployments de Kubernetes sin modificar el código de la aplicación.
 
 ## Endpoints
 
