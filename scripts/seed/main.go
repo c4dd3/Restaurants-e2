@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 
+	"restaurants-e2/internal/adapters/repomongo"
 	"restaurants-e2/internal/adapters/repopg"
 	"restaurants-e2/internal/auth"
 	"restaurants-e2/internal/config"
@@ -28,6 +29,8 @@ func main() {
 	adminEmail := flag.String("admin-email", "admin@seed.com", "email del admin")
 	adminPassword := flag.String("admin-password", "admin12345", "password del admin")
 	dryRun := flag.Bool("dry-run", false, "genera datos pero NO inserta en BD")
+	overrideMongoURI := flag.String("mongo-uri", "", "sobreescribe MONGO_URI (útil al correr fuera de Docker, e.g. mongodb://localhost:27017)")
+	overridePgDSN := flag.String("pg-dsn", "", "sobreescribe POSTGRES_DSN (útil al correr fuera de Docker)")
 	flag.Parse()
 
 	// ── Config ─────────────────────────────────────────────────────────────
@@ -35,6 +38,16 @@ func main() {
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("[seed] config inválida: %v", err)
+	}
+
+	// Flags de conexión sobreescriben lo cargado desde .env / variables de entorno.
+	if *overrideMongoURI != "" {
+		cfg.Mongo.URI = *overrideMongoURI
+		log.Printf("[seed] MONGO_URI sobreescrita: %s", cfg.Mongo.URI)
+	}
+	if *overridePgDSN != "" {
+		cfg.Postgres.DSN = *overridePgDSN
+		log.Printf("[seed] POSTGRES_DSN sobreescrita")
 	}
 
 	apiKey := os.Getenv("ANTHROPIC_API_KEY")
@@ -302,8 +315,14 @@ func connectRepos(ctx context.Context, cfg *config.Config) (*ports.Repositories,
 			return nil, err
 		}
 		return repopg.NewRepositories(pool), nil
+	case config.EngineMongo:
+		client, err := repomongo.NewClient(ctx, cfg.Mongo)
+		if err != nil {
+			return nil, err
+		}
+		return repomongo.NewRepositories(client, cfg.Mongo.DBName), nil
 	default:
-		return nil, fmt.Errorf("engine %q no soportado en seed aún", cfg.Engine)
+		return nil, fmt.Errorf("engine %q no soportado en seed", cfg.Engine)
 	}
 }
 
