@@ -29,6 +29,8 @@ func main() {
 	adminEmail := flag.String("admin-email", "admin@seed.com", "email del admin")
 	adminPassword := flag.String("admin-password", "admin12345", "password del admin")
 	dryRun := flag.Bool("dry-run", false, "genera datos pero NO inserta en BD")
+	overrideMongoURI := flag.String("mongo-uri", "", "sobreescribe MONGO_URI (útil al correr fuera de Docker, e.g. mongodb://localhost:27017)")
+	overridePgDSN := flag.String("pg-dsn", "", "sobreescribe POSTGRES_DSN (útil al correr fuera de Docker)")
 	flag.Parse()
 
 	// ── Config ─────────────────────────────────────────────────────────────
@@ -36,6 +38,16 @@ func main() {
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("[seed] config inválida: %v", err)
+	}
+
+	// Flags de conexión sobreescriben lo cargado desde .env / variables de entorno.
+	if *overrideMongoURI != "" {
+		cfg.Mongo.URI = *overrideMongoURI
+		log.Printf("[seed] MONGO_URI sobreescrita: %s", cfg.Mongo.URI)
+	}
+	if *overridePgDSN != "" {
+		cfg.Postgres.DSN = *overridePgDSN
+		log.Printf("[seed] POSTGRES_DSN sobreescrita")
 	}
 
 	apiKey := os.Getenv("ANTHROPIC_API_KEY")
